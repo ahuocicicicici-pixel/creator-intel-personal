@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { width: 320px; margin: 0; color: #17181b; background: #fff; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+    header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #eceef1; }
+    .mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #17181b; color: #fff; font-weight: 800; }
+    .title { min-width: 0; }
+    .title b { display: block; font-size: 14px; }
+    .title span { display: block; color: #747982; font-size: 11px; }
+    main { padding: 14px 16px 16px; }
+    .status { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 8px 10px; background: #f3f4f6; border-radius: 8px; color: #555b64; }
+    .dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #a5aab2; }
+    .dot.ok { background: #168354; }
+    .dot.err { background: #d64545; }
+    label { display: block; margin: 13px 0 5px; color: #464b53; font-size: 12px; font-weight: 650; }
+    .keyrow { display: grid; grid-template-columns: 1fr 36px; gap: 6px; }
+    input, select, button { font: inherit; }
+    input[type="password"], input[type="text"], select { width: 100%; min-width: 0; height: 36px; padding: 7px 9px; border: 1px solid #cfd3d9; border-radius: 7px; background: #fff; color: #17181b; outline: none; }
+    input:focus, select:focus { border-color: #4c67e8; box-shadow: 0 0 0 2px rgba(76,103,232,.12); }
+    button { height: 36px; padding: 0 12px; border: 1px solid #cfd3d9; border-radius: 7px; background: #fff; color: #292d33; font-weight: 650; cursor: pointer; }
+    button:hover { background: #f5f6f7; }
+    button.primary { width: 100%; margin-top: 10px; border-color: #17181b; background: #17181b; color: #fff; }
+    button.primary:hover { background: #2a2c31; }
+    button:disabled { opacity: .55; cursor: default; }
+    .iconbtn { width: 36px; padding: 0; font-size: 11px; }
+    .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eceef1; }
+    .toggle label { margin: 0; }
+    .toggle input { width: 17px; height: 17px; accent-color: #17181b; }
+    .hint { margin-top: 10px; color: #858a93; font-size: 11px; }
+    .hint a { color: #4c67e8; text-decoration: none; }
+    .version { margin-top: 12px; color: #b0b4bb; font-size: 10px; text-align: right; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="mark">CI</div>
+    <div class="title"><b>Creator Intel Personal</b><span>mccoco.xyz · 个人版</span></div>
+  </header>
+  <main>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">读取设置中...</span></div>
+
+    <label for="personalApiKey">个人达人库 API Key</label>
+    <div class="keyrow">
+      <input id="personalApiKey" type="password" autocomplete="off" placeholder="必填：个人 VPS 访问密钥">
+      <button class="iconbtn" id="showPersonalKey" type="button" title="显示或隐藏个人库密钥">显示</button>
+    </div>
+
+    <label for="apiKey">TikHub API Key（可选）</label>
+    <div class="keyrow">
+      <input id="apiKey" type="password" autocomplete="off" placeholder="可选：Bearer Token">
+      <button class="iconbtn" id="showKey" type="button" title="显示或隐藏 API Key">显示</button>
+    </div>
+
+    <label for="cacheHours">资料缓存时间</label>
+    <select id="cacheHours">
+      <option value="1">1 小时</option>
+      <option value="6">6 小时</option>
+      <option value="24">24 小时</option>
+      <option value="72">3 天</option>
+      <option value="168">7 天</option>
+    </select>
+
+    <div class="toggle">
+      <label for="enabled">在达人主页显示面板</label>
+      <input id="enabled" type="checkbox">
+    </div>
+
+    <button class="primary" id="saveBtn" type="button">保存设置</button>
+    <div class="hint">个人库 Key 用于查询你 VPS 上的只读公开达人库。TikHub Key 可选，用于补充实时公开资料。两个 Key 都只保存在当前浏览器。</div>
+    <div class="hint"><a href="https://app.tikhub.io" target="_blank" rel="noreferrer">打开 TikHub 控制台</a></div>
+    <div class="version" id="version"></div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
