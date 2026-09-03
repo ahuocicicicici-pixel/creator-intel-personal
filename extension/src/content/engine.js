@@ -81,6 +81,26 @@
     .query:hover { background: #f5f6f7; } .query:disabled { opacity: .58; cursor: default; }
     .message { min-height: 16px; margin-top: 6px; color: #858a93; font-size: 10px; }
     .message.error { color: #c33f3f; }
+    .audience-analysis { padding-top:2px; }
+    .audience-title { color:#30343a; font-size:11px; font-weight:750; }
+    .audience-copy { margin-top:3px; color:#777e88; font-size:9px; line-height:1.5; }
+    .aud-query { width:100%; min-height:34px; margin-top:9px; padding:7px 9px; border:0; border-radius:7px; background:#20242a;
+      color:#fff; cursor:pointer; font:700 11px/1.35 -apple-system,"SF Pro Text",system-ui,"PingFang SC",sans-serif; }
+    .aud-query:hover { background:#353a42; } .aud-query:disabled { opacity:.58; cursor:default; }
+    .aud-status { min-height:15px; margin-top:6px; color:#858a93; font-size:9px; }
+    .aud-status.error { color:#c33f3f; }
+    .aud-result { margin-top:9px; padding:9px; border:1px solid #e5e7eb; border-radius:8px; background:#fafafa; }
+    .aud-result-head { display:flex; justify-content:space-between; gap:8px; margin-bottom:7px; color:#4c535d; font-size:9px; }
+    .aud-result-head b { color:#252a31; font-size:10px; }
+    .aud-tier { display:grid; grid-template-columns:42px 1fr 30px; align-items:center; gap:6px; margin-top:5px; color:#68707a; font-size:9px; }
+    .aud-tier b { color:#3f464f; font-size:9px; text-align:right; }
+    .aud-bar { height:5px; overflow:hidden; border-radius:999px; background:#e6e8eb; }
+    .aud-bar i { display:block; height:100%; border-radius:inherit; background:#7c8795; }
+    .aud-tier.t1 .aud-bar i { background:#15905a; } .aud-tier.t2 .aud-bar i { background:#d69b26; }
+    .aud-countries { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+    .aud-country { padding:2px 5px; border-radius:999px; background:#eef0f2; color:#515862; font-size:8px; }
+    .aud-result-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; color:#8a9099; font-size:8px; }
+    .aud-refresh { padding:2px 0; border:0; background:none; color:#b82b7d; cursor:pointer; font:700 8px inherit; }
     .foot { padding: 10px 12px 12px; background:#fff; }
     .personal-entry { min-height:34px; display:flex; align-items:center; justify-content:center; gap:7px; border-radius:8px; background:#f4f5f6; color:#4a5058; font-size:10px; font-weight:700; }
     .personal-entry b { color:#20242a; }
@@ -184,6 +204,26 @@
       if (chrome.runtime.lastError) return resolve(null);
       resolve(response);
     });
+  });
+
+  const runAudienceRequest = (message) => new Promise((resolve) => {
+    const port = chrome.runtime.connect({ name: 'creator-intel-audience' });
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(heartbeat);
+      try { port.disconnect(); } catch {}
+      resolve(value);
+    };
+    const heartbeat = setInterval(() => {
+      try { port.postMessage({ type: 'ping' }); } catch { finish(null); }
+    }, 20_000);
+    port.onMessage.addListener((event) => {
+      if (event?.type === 'audienceResult') finish(event.response || null);
+    });
+    port.onDisconnect.addListener(() => finish(null));
+    port.postMessage(message);
   });
 
   function parseCount(value) {
@@ -497,16 +537,9 @@
     style.textContent = CSS;
     const wrapper = document.createElement('div');
     const audienceTab = `<button class="kol-tab" type="button" role="tab" aria-selected="false" data-tab="audience">${icon('followers')}<span>粉丝</span></button>`;
-    const audiencePanel = `
-      <section class="kol-panel" role="tabpanel" data-panel="audience" hidden>
-        <div class="fan-grid">
-          <div class="fan-stat"><b data-fan="followers">—</b><span>当前粉丝</span></div>
-          <div class="fan-stat"><b data-fan="following">—</b><span>关注数</span></div>
-          <div class="fan-stat"><b data-fan="posts">—</b><span>内容数</span></div>
-          <div class="fan-stat"><b data-fan="country">—</b><span>账号地区</span></div>
-        </div>
+    const profilePanel = `
         <div class="api">
-          <div class="apihead"><b>粉丝画像（可选）</b><span class="verified" style="display:none">✓</span></div>
+          <div class="apihead"><b>公开资料补充（可选）</b><span class="verified" style="display:none">✓</span></div>
           <div class="name">页面粉丝数据无需 API Key</div>
           <div class="rows">
             <div class="row" data-row="followers" style="display:none"><span>粉丝</span><b></b></div>
@@ -518,9 +551,26 @@
             <div class="row" data-row="country" style="display:none"><span>账号地区</span><b></b></div>
             <div class="row" data-row="updated" style="display:none"><span>更新时间</span><b></b></div>
           </div>
-          <button class="query" type="button">重新抓取页面公开数据</button>
-          <div class="message">已自动读取当前页面；TikHub API Key 仅用于补充粉丝画像</div>
+          <button class="query profile-query" type="button">重新抓取页面公开数据</button>
+          <div class="message profile-message">已自动读取当前页面；TikHub API Key 仅用于补充公开资料</div>
+        </div>`;
+    const igAudiencePanel = `
+        <div class="audience-analysis">
+          <div class="audience-title">粉丝画像 · 受众地区</div>
+          <div class="audience-copy">抽样近期 Reels 的公开互动用户，聚合其公开账号所在地。最多约 313 次 TikHub 请求；按当前公开单价，费用上限约 US$2.43，实际以 TikHub 计费为准。</div>
+          <button class="aud-query" type="button" data-audience-query>分析粉丝画像（最多约 US$2.43）</button>
+          <div class="aud-status" data-audience-status>尚未分析</div>
+          <div data-audience-result></div>
+        </div>`;
+    const audiencePanel = `
+      <section class="kol-panel" role="tabpanel" data-panel="audience" hidden>
+        <div class="fan-grid">
+          <div class="fan-stat"><b data-fan="followers">—</b><span>当前粉丝</span></div>
+          <div class="fan-stat"><b data-fan="following">—</b><span>关注数</span></div>
+          <div class="fan-stat"><b data-fan="posts">—</b><span>内容数</span></div>
+          <div class="fan-stat"><b data-fan="country">—</b><span>账号地区</span></div>
         </div>
+        ${config.code === 'IG' ? igAudiencePanel : profilePanel}
       </section>`;
     wrapper.innerHTML = `
       <div class="card pf-${config.code}">
@@ -579,28 +629,34 @@
       place();
     });
 
-    const queryButton = wrapper.querySelector('.query');
-    const message = wrapper.querySelector('.message');
+    const queryButton = wrapper.querySelector('.profile-query');
+    const message = wrapper.querySelector('.profile-message');
     let tikhubConfigured = false;
-    const setMessage = (text, error = false) => { message.textContent = text; message.className = `message${error ? ' error' : ''}`; };
+    const setMessage = (text, error = false) => {
+      if (!message) return;
+      message.textContent = text;
+      message.className = `message profile-message${error ? ' error' : ''}`;
+    };
     ask({ type: 'getCachedProfile', platform: config.code, handle: config.handle }).then((result) => {
       if (!wrapper.isConnected || !result) return;
       showLibrary(wrapper, result.library, config);
       tikhubConfigured = result.configured;
       if (result.profile) {
         showProfile(wrapper, result.profile);
-        queryButton.textContent = result.configured
-          ? (result.fresh ? '刷新粉丝画像（可能计费）' : '画像缓存已过期，重新获取')
-          : '重新抓取页面公开数据';
-        setMessage(result.configured
-          ? (result.fresh ? '已从本机缓存恢复，本次未产生 API 请求' : '缓存已过期，点击后请求最新资料')
-          : '已显示本机历史缓存；页面公开数据仍可无 Key 自动更新');
-      } else if (!result.configured) {
+        if (queryButton) {
+          queryButton.textContent = result.configured
+            ? (result.fresh ? '刷新公开资料（可能计费）' : '资料缓存已过期，重新获取')
+            : '重新抓取页面公开数据';
+          setMessage(result.configured
+            ? (result.fresh ? '已从本机缓存恢复，本次未产生 API 请求' : '缓存已过期，点击后请求最新资料')
+            : '已显示本机历史缓存；页面公开数据仍可无 Key 自动更新');
+        }
+      } else if (!result.configured && queryButton) {
         queryButton.textContent = '重新抓取页面公开数据';
         setMessage('无需 API Key；已自动读取页面，点击可立即重试');
-      } else {
-        queryButton.textContent = '获取粉丝画像（可能计费）';
-        setMessage('页面数据已自动读取；点击可补充粉丝画像');
+      } else if (queryButton) {
+        queryButton.textContent = '获取公开资料（可能计费）';
+        setMessage('页面数据已自动读取；点击可补充公开资料');
       }
     });
     queryButton?.addEventListener('click', async () => {
@@ -615,20 +671,70 @@
         return;
       }
       queryButton.disabled = true;
-      queryButton.textContent = '正在获取粉丝画像...';
+      queryButton.textContent = '正在获取公开资料...';
       setMessage('本次操作会调用 TikHub，可能产生 API 费用');
       const result = await ask({ type: 'fetchProfile', platform: config.code, handle: config.handle, pageUrl: location.href.split('?')[0] });
       queryButton.disabled = false;
       if (!result || !result.ok) {
-        queryButton.textContent = '重试获取粉丝画像';
+        queryButton.textContent = '重试获取公开资料';
         setMessage((result && result.error) || '请求失败，请稍后重试', true);
         return;
       }
       showProfile(wrapper, result.profile);
-      queryButton.textContent = '刷新粉丝画像（可能计费）';
-      setMessage('粉丝画像已更新并缓存到本机');
+      queryButton.textContent = '刷新公开资料（可能计费）';
+      setMessage('公开资料已更新并缓存到本机');
       place();
     });
+
+    const audienceButton = wrapper.querySelector('[data-audience-query]');
+    const audienceStatus = wrapper.querySelector('[data-audience-status]');
+    const audienceResult = wrapper.querySelector('[data-audience-result]');
+    if (audienceButton && audienceStatus && audienceResult) {
+      const setAudienceStatus = (text, error = false) => {
+        audienceStatus.textContent = text;
+        audienceStatus.className = `aud-status${error ? ' error' : ''}`;
+      };
+      const renderAudience = (result, { cached = false, fresh = true } = {}) => {
+        const tier = (label, value, cls) => `<div class="aud-tier ${cls}"><span>${label}</span><span class="aud-bar"><i style="width:${Math.max(0, Math.min(100, Number(value) || 0))}%"></i></span><b>${Number(value) || 0}%</b></div>`;
+        const countries = (result.topCountries || []).map((item) => `<span class="aud-country">${escapeHtml(item.flag)} ${escapeHtml(item.name || item.cc)} ${Number(item.pct) || 0}%</span>`).join('');
+        const date = result.at ? String(result.at).slice(0, 10) : '';
+        audienceResult.innerHTML = `<div class="aud-result"><div class="aud-result-head"><b>受众地区分布</b><span>${Number(result.valid) || 0}/${Number(result.analyzed) || 0} 有效样本</span></div>${tier('发达', result.tierPct?.T1, 't1')}${tier('发展中', result.tierPct?.T2, 't2')}${tier('其他', result.tierPct?.T3, 't3')}<div class="aud-countries">${countries}</div><div class="aud-result-foot"><span>${cached ? '本机缓存 · ' : ''}${escapeHtml(date)}</span><button class="aud-refresh" type="button" data-audience-refresh>重新分析</button></div></div>`;
+        audienceButton.hidden = true;
+        setAudienceStatus(cached
+          ? (fresh ? '已读取本机缓存，本次未调用 TikHub' : '本机缓存已过期，可保留查看或点击重新分析')
+          : '分析完成，结果已缓存到本机');
+        audienceResult.querySelector('[data-audience-refresh]')?.addEventListener('click', () => startAudience(true));
+        place();
+      };
+      const startAudience = async (force) => {
+        audienceButton.hidden = false;
+        audienceButton.disabled = true;
+        audienceButton.textContent = '正在分析… 0s';
+        setAudienceStatus('正在抽样近期互动用户；首次通常需要 1–3 分钟，请保持此页面开启');
+        let seconds = 0;
+        const timer = setInterval(() => { seconds += 1; if (audienceButton.isConnected) audienceButton.textContent = `正在分析… ${seconds}s`; }, 1000);
+        const response = await runAudienceRequest({ type: 'fetchAudience', platform: config.code, handle: config.handle, force });
+        clearInterval(timer);
+        if (!wrapper.isConnected) return;
+        audienceButton.disabled = false;
+        if (!response?.ok || !response.result) {
+          audienceButton.hidden = false;
+          audienceButton.textContent = '重试分析粉丝画像';
+          setAudienceStatus(response?.error || '分析中断，请稍后重试', true);
+          return;
+        }
+        renderAudience(response.result, { cached: Boolean(response.cached), fresh: true });
+      };
+      audienceButton.addEventListener('click', () => startAudience(false));
+      ask({ type: 'getCachedAudience', platform: config.code, handle: config.handle }).then((cached) => {
+        if (!wrapper.isConnected || !cached) return;
+        if (cached.result) renderAudience(cached.result, { cached: true, fresh: cached.fresh });
+        else if (!cached.configured) {
+          audienceButton.textContent = '配置 TikHub Key 后分析';
+          setAudienceStatus('当前未配置 TikHub API Key；页面基础数据不受影响');
+        }
+      });
+    }
 
     let userMoved = false;
     function place() {

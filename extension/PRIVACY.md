@@ -2,7 +2,7 @@
 
 Last updated: September 3, 2026
 
-COCO Creator Intel processes public creator profile information on supported social media pages and performs an exact lookup against a read-only creator library. Only after an explicit user action does it request additional public profile information from the TikHub API.
+COCO Creator Intel processes public creator profile information on supported social media pages and performs an exact lookup against a read-only creator library. Only after an explicit user action does it request additional public profile or Instagram audience-location information from the TikHub API.
 
 ## Data stored locally
 
@@ -13,7 +13,7 @@ The extension stores the following data in Chrome local extension storage:
 - Whether the on-page panel is enabled.
 - The selected cache duration.
 - X velocity-radar preferences, including whether badges and the local leaderboard are enabled and their thresholds.
-- Up to 100 cached public creator profile results and their timestamps.
+- Up to 100 cached public creator profile and Instagram audience-analysis results, plus a bounded cache of public audience-account country results and timestamps.
 
 This locally stored data is not synchronized through a Chrome account. The signed session is sent only to `https://mccoco.xyz/creator-intel-api`; the TikHub key is sent only to TikHub.
 
@@ -27,11 +27,11 @@ Historical prices and past collaboration records are returned only when the veri
 
 ## Network requests
 
-The extension sends exact platform-and-handle lookups to `https://mccoco.xyz/creator-intel-api` using the signed login session. The service exposes no list or export endpoint. The extension sends requests directly from the browser to `https://api.tikhub.io` using the separate TikHub API Key supplied by the user. TikHub creator requests are initiated only when the user clicks the query button. Key validation requests may be sent when the user saves settings.
+The extension sends exact platform-and-handle lookups to `https://mccoco.xyz/creator-intel-api` using the signed login session. The service exposes no list or export endpoint. The extension sends requests directly from the browser to `https://api.tikhub.io` using the separate TikHub API Key supplied by the user. TikHub creator requests are initiated only when the user clicks a query button. Instagram audience analysis requests recent public Reels, public liker identifiers/usernames, and those public accounts' “account based in” information to calculate an aggregate country distribution locally. One analysis is capped at approximately 313 TikHub requests. Key validation requests may be sent when the user saves settings.
 
 ## Social media pages
 
-The extension reads public page content and statistics already loaded by TikTok, Instagram, YouTube, or X to display local estimates. On X, it locally calculates each visible public post's average exposure velocity from its public cumulative views and published time, and may show a local leaderboard for posts seen in the current tab. It does not call the X API or upload post content, post metrics, velocity results, or leaderboard data. It sends only the public platform and handle to the personal library for an exact lookup; locally calculated page statistics are not uploaded.
+The extension reads public page content and statistics already loaded by TikTok, Instagram, YouTube, or X to display local estimates. On X, it locally calculates each visible public post's average exposure velocity from its public cumulative views and published time, and may show a local leaderboard for posts seen in the current tab. It does not call the X API or upload post content, post metrics, velocity results, or leaderboard data. It sends only the public platform and handle to the personal library for an exact lookup; locally calculated page statistics and Instagram audience-analysis results are not uploaded to the personal service.
 
 ## Data sharing and sale
 

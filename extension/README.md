@@ -1,6 +1,6 @@
 # COCO Creator Intel
 
-COCO 形象的独立个人版 Chrome 扩展。在 TikTok、Instagram、YouTube 和 X 的达人主页自动读取公开数据，精确匹配个人 VPS 上的达人历史库，并允许用户选择性使用自己的 TikHub API Key 获取粉丝画像。
+COCO 形象的独立个人版 Chrome 扩展。在 TikTok、Instagram、YouTube 和 X 的达人主页自动读取公开数据，精确匹配个人 VPS 上的达人历史库，并允许用户选择性使用自己的 TikHub API Key 分析 Instagram 受众地区。
 
 ## 功能
 
@@ -12,8 +12,8 @@ COCO 形象的独立个人版 Chrome 扩展。在 TikTok、Instagram、YouTube �
 - 任意 Google 账号均可登录并查询 `mccoco.xyz` 上的公开达人历史数据。
 - 登录用户可以写达人评价并删除自己的评价；所有者可以管理全部评价。
 - 只有服务端核验为所有者的 Google 账号可查看历史价格与过往合作字段。
-- 用户可选择主动点击并直连 TikHub API 获取粉丝画像。
-- TikHub API Key 和查询缓存只保存在当前浏览器的 `chrome.storage.local`。
+- Instagram 粉丝页提供“分析粉丝画像”按钮：抽样近期 Reels 的公开互动用户，聚合其公开账号所在地，显示国家与地区档位分布。
+- 用户主动点击后才会直连 TikHub；TikHub API Key、受众国家缓存和分析结果只保存在当前浏览器的 `chrome.storage.local`。
 - 默认缓存 24 小时，可在扩展弹窗调整；X 流速阈值和榜单数量也可单独配置。
 
 ## 本地安装
@@ -25,7 +25,7 @@ COCO 形象的独立个人版 Chrome 扩展。在 TikTok、Instagram、YouTube �
 
 ## 费用提示
 
-页面本地统计不会调用 TikHub。只有用户在达人面板中点击“获取粉丝画像”时才会请求 TikHub API，相关费用由用户自己的 TikHub 账户承担。YouTube 查询需要先解析频道 ID，再获取频道资料，可能产生两次 API 请求。
+页面本地统计不会调用 TikHub。只有用户主动点击 TikHub 补充资料或 Instagram“分析粉丝画像”时才会请求 TikHub API，相关费用由用户自己的 TikHub 账户承担。受众分析最多约 313 次请求；按 2026-09-03 TikHub 公开单价，上限约 US$2.43，实际费用以 TikHub 为准。已有结果和已查用户地区会在本机复用。
 
 ## 数据边界
 

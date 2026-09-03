@@ -1,8 +1,26 @@
+importScripts('audience-core.js');
+
 const API_BASE = 'https://api.tikhub.io';
 const PERSONAL_API_BASE = 'https://mccoco.xyz/creator-intel-api';
 const DEFAULTS = { enabled: true, cacheHours: 24 };
 const memoryCache = new Map();
 const libraryCache = new Map();
+const audienceJobs = new Map();
+let audienceResultMemory = null;
+let audienceCountryMemory = null;
+let audienceResultLoad = null;
+let audienceCountryLoad = null;
+let audienceResultSave = Promise.resolve();
+let audienceCountrySave = Promise.resolve();
+
+const AUDIENCE_TARGET = 100;
+const AUDIENCE_MAX_LOOKUPS = 300;
+const AUDIENCE_REELS = 12;
+const AUDIENCE_PER_REEL = 50;
+const AUDIENCE_CONCURRENCY = 6;
+const AUDIENCE_BREAK_AT = 20;
+const AUDIENCE_MIN_VALID = 20;
+const AUDIENCE_COUNTRY_HIT_MS = 90 * 24 * 3_600_000;
 
 function cacheKey(platform, handle) {
   return `${platform}:${String(handle).toLowerCase()}`;
@@ -282,6 +300,190 @@ async function writeCache(profile) {
   await chrome.storage.local.set({ profileCache: trimmed });
 }
 
+async function readAudienceCache(platform, handle) {
+  const key = cacheKey(platform, handle);
+  if (!audienceResultMemory) {
+    audienceResultLoad ||= chrome.storage.local.get(['audienceCache']).then(({ audienceCache = {} }) => {
+      audienceResultMemory = new Map(Object.entries(audienceCache));
+      return audienceResultMemory;
+    });
+    await audienceResultLoad;
+  }
+  return audienceResultMemory.get(key) || null;
+}
+
+async function writeAudienceCache(result) {
+  const key = cacheKey(result.platform, result.handle);
+  await readAudienceCache(result.platform, result.handle);
+  audienceResultMemory.set(key, result);
+  audienceResultSave = audienceResultSave.catch(() => {}).then(async () => {
+    const entries = [...audienceResultMemory.entries()]
+      .sort((left, right) => String(right[1]?.at || '').localeCompare(String(left[1]?.at || '')));
+    for (const [oldKey] of entries.slice(100)) audienceResultMemory.delete(oldKey);
+    await chrome.storage.local.set({ audienceCache: Object.fromEntries(audienceResultMemory) });
+  });
+  await audienceResultSave;
+}
+
+async function audienceCountries() {
+  if (audienceCountryMemory) return audienceCountryMemory;
+  audienceCountryLoad ||= chrome.storage.local.get(['audienceCountryCache']).then(({ audienceCountryCache = {} }) => {
+    audienceCountryMemory = new Map(Object.entries(audienceCountryCache));
+    return audienceCountryMemory;
+  });
+  return audienceCountryLoad;
+}
+
+async function saveAudienceCountries() {
+  await audienceCountries();
+  audienceCountrySave = audienceCountrySave.catch(() => {}).then(async () => {
+    const entries = [...audienceCountryMemory.entries()]
+      .sort((left, right) => Number(right[1]?.at || 0) - Number(left[1]?.at || 0));
+    for (const [oldKey] of entries.slice(5000)) audienceCountryMemory.delete(oldKey);
+    await chrome.storage.local.set({ audienceCountryCache: Object.fromEntries(audienceCountryMemory) });
+  });
+  await audienceCountrySave;
+}
+
+async function mapConcurrent(values, concurrency, worker) {
+  let cursor = 0;
+  const results = new Array(values.length);
+  const run = async () => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      results[index] = await worker(values[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, run));
+  return results;
+}
+
+async function runAudience(handle, cacheHours, isCancelled) {
+  const core = globalThis.CreatorIntelAudienceCore;
+  if (isCancelled()) throw new Error('分析已取消');
+  const reelsResponse = await apiCall('/api/v1/instagram/v2/fetch_user_reels', { username: handle });
+  const codes = core.reelCodes(reelsResponse, AUDIENCE_REELS);
+  if (!codes.length) throw new Error('取不到该账号近期 Reels，请确认账号公开且存在 Reels');
+
+  const likeLists = await mapConcurrent(codes, 4, async (code) => {
+    if (isCancelled()) return [];
+    try {
+      const response = await apiCall('/api/v1/instagram/v2/fetch_post_likes', { code_or_url: code });
+      return core.postLikeUsers(response, AUDIENCE_PER_REEL);
+    } catch { return []; }
+  });
+  const candidates = [];
+  const seen = new Set();
+  for (const users of likeLists) {
+    for (const user of users) {
+      if (!seen.has(user.id)) { seen.add(user.id); candidates.push(user); }
+      if (candidates.length >= AUDIENCE_MAX_LOOKUPS) break;
+    }
+    if (candidates.length >= AUDIENCE_MAX_LOOKUPS) break;
+  }
+  if (!candidates.length) throw new Error('取不到近期内容互动用户，可能是 TikHub 暂时限流');
+
+  const countryCache = await audienceCountries();
+  const counts = {};
+  let valid = 0;
+  let analyzed = 0;
+  let errors = 0;
+  let consecutiveErrors = 0;
+  let freshLookups = 0;
+  let cursor = 0;
+  let stop = false;
+  const worker = async () => {
+    while (!stop) {
+      const index = cursor++;
+      if (isCancelled()) { stop = true; return; }
+      if (index >= candidates.length || analyzed >= AUDIENCE_MAX_LOOKUPS) return;
+      const user = candidates[index];
+      const userKey = `ig:${user.id}`;
+      analyzed += 1;
+      let country;
+      const cached = countryCache.get(userKey);
+      const cachedAge = cached ? Date.now() - Number(cached.at || 0) : Infinity;
+      const cachedTtl = cached?.cc ? AUDIENCE_COUNTRY_HIT_MS : Math.max(1, Number(cacheHours) || DEFAULTS.cacheHours) * 3_600_000;
+      if (cached && Object.prototype.hasOwnProperty.call(cached, 'cc') && cachedAge < cachedTtl) {
+        country = cached.cc || null;
+      } else {
+        if (cached) countryCache.delete(userKey);
+        try {
+          const response = await apiCall('/api/v1/instagram/v3/get_user_about', { username: user.username });
+          country = core.countryFromAbout(response);
+          if (country === undefined) throw new Error('ig_about_unavailable');
+          countryCache.set(userKey, { cc: country || null, at: Date.now() });
+          consecutiveErrors = 0;
+          freshLookups += 1;
+          if (freshLookups % 25 === 0) await saveAudienceCountries();
+        } catch {
+          errors += 1;
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= AUDIENCE_BREAK_AT) stop = true;
+          continue;
+        }
+      }
+      if (country) {
+        counts[country] = (counts[country] || 0) + 1;
+        valid += 1;
+        if (valid >= AUDIENCE_TARGET) stop = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(AUDIENCE_CONCURRENCY, candidates.length) }, worker));
+  await saveAudienceCountries();
+  if (isCancelled()) throw new Error('分析已取消');
+  if (consecutiveErrors >= AUDIENCE_BREAK_AT) throw new Error('TikHub 受众接口连续异常，已停止请求以避免继续计费');
+  if (valid < AUDIENCE_MIN_VALID) throw new Error(`有效地区样本不足（${valid}/${AUDIENCE_MIN_VALID}），未生成画像`);
+  const result = core.buildResult({ handle, counts, analyzed, target: AUDIENCE_TARGET });
+  if (!result) throw new Error(errors ? 'TikHub 受众接口暂时异常，请稍后重试' : '抽样用户均未公开所在地区');
+  await writeAudienceCache(result);
+  return result;
+}
+
+function releaseAudienceSubscriber(subscriber) {
+  if (!subscriber?.active || !subscriber.entry) return;
+  subscriber.active = false;
+  subscriber.entry.subscribers = Math.max(0, subscriber.entry.subscribers - 1);
+  if (subscriber.cancelled && subscriber.entry.subscribers === 0) subscriber.entry.cancelled = true;
+}
+
+async function fetchAudience(platform, handle, force = false, subscriber = { cancelled: false }) {
+  if (platform !== 'IG') return { ok: false, error: '粉丝画像目前仅支持 Instagram' };
+  const cfg = await settings();
+  if (subscriber.cancelled) return { ok: false, error: '分析已取消' };
+  if (!cfg.apiKey) return { ok: false, error: '请先在扩展设置中填写 TikHub API Key' };
+  if (!force) {
+    const cached = await readAudienceCache(platform, handle);
+    const fresh = Boolean(cached && Date.now() - Date.parse(cached.at) < cfg.cacheHours * 3_600_000);
+    if (fresh) return { ok: true, result: cached, cached: true };
+  }
+  const key = cacheKey(platform, handle);
+  let entry = audienceJobs.get(key);
+  if (entry?.cancelled) {
+    await entry.promise.catch(() => {});
+    entry = null;
+  }
+  if (!entry) {
+    entry = { cancelled: false, subscribers: 0, promise: null };
+    entry.promise = runAudience(String(handle || '').trim().replace(/^@/, ''), cfg.cacheHours, () => entry.cancelled)
+      .finally(() => { if (audienceJobs.get(key) === entry) audienceJobs.delete(key); });
+    audienceJobs.set(key, entry);
+  }
+  entry.subscribers += 1;
+  subscriber.entry = entry;
+  subscriber.active = true;
+  if (subscriber.cancelled) releaseAudienceSubscriber(subscriber);
+  try {
+    if (subscriber.cancelled) return { ok: false, error: '分析已取消' };
+    return { ok: true, result: await entry.promise, cached: false };
+  } catch (error) {
+    return { ok: false, error: error.message || '粉丝画像分析失败' };
+  } finally {
+    releaseAudienceSubscriber(subscriber);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'getSettings') {
     settings().then((value) => sendResponse({
@@ -341,6 +543,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true;
   }
+  if (message?.type === 'getCachedAudience') {
+    Promise.all([settings(), readAudienceCache(message.platform, message.handle)]).then(([cfg, result]) => {
+      const fresh = Boolean(result && Date.now() - Date.parse(result.at) < cfg.cacheHours * 3_600_000);
+      sendResponse({ result, fresh, configured: Boolean(cfg.apiKey) });
+    });
+    return true;
+  }
   if (message?.type === 'refreshCreatorContext') {
     libraryLookup(message.platform, message.handle, { force: true }).then((context) => sendResponse({ context }));
     return true;
@@ -360,4 +569,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'creator-intel-audience') return;
+  let started = false;
+  const subscriber = { cancelled: false, active: false, entry: null };
+  port.onDisconnect.addListener(() => {
+    subscriber.cancelled = true;
+    releaseAudienceSubscriber(subscriber);
+  });
+  port.onMessage.addListener((message) => {
+    if (message?.type === 'ping') {
+      try { port.postMessage({ type: 'pong' }); } catch {}
+      return;
+    }
+    if (message?.type !== 'fetchAudience' || started) return;
+    started = true;
+    fetchAudience(message.platform, message.handle, Boolean(message.force), subscriber).then((response) => {
+      try { port.postMessage({ type: 'audienceResult', response }); } catch {}
+    });
+  });
 });

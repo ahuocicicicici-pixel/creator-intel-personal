@@ -23,3 +23,11 @@
 - Confirmed cause: metrics were overwritten rather than merged monotonically, and response bodies were cloned before route/operation/type/size checks.
 - Future rule: merge cumulative counters by maximum, preserve complete GraphQL records, return unknown for incomplete/small/impossible rates, and filter public route plus operation before reading any response body.
 - Verification: cover null/small/>100% inputs, monotonic merge including bookmarks, private-route disablement, pre-read response filtering, and packaged-source byte equality.
+
+## “粉丝画像” means audience distribution, not account metadata
+
+- Trigger: the personal card has a Followers tab or the user requests the verified follower-profile feature.
+- Error: basic follower/following/post counts and an account-profile refresh button were labeled as “粉丝画像”, leaving out the expected analysis action and distribution result.
+- Confirmed cause: the published personal UI shell was restored without tracing the separate verified Instagram audience-analysis pipeline.
+- Future rule: preserve the basic profile stats, but treat “粉丝画像” as an explicit, cost-disclosed analysis of recent public audience accounts with progress, effective sample size, country/tier distribution, cache reuse, refresh, and failure states.
+- Verification: assert that the IG Followers panel contains the analysis button and result wiring, unit-test TikHub response parsing/aggregation, and confirm review, engagement-rate, and X-radar regression tests still pass.
