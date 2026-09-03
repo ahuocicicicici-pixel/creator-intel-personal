@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Creator Intel Personal",
-  "version": "1.1.0",
-  "description": "个人达人情报徽章：读取四个平台公开数据，并匹配个人 VPS 达人库；TikHub 可选增强。",
+  "name": "COCO Creator Intel",
+  "version": "1.3.2",
+  "description": "COCO shows creator metrics and reviews, plus locally calculated post velocity insights on X.",
   "permissions": [
-    "storage"
+    "storage",
+    "identity"
   ],
   "host_permissions": [
     "https://api.tikhub.io/*",
@@ -21,7 +22,7 @@
   },
   "action": {
     "default_popup": "src/popup.html",
-    "default_title": "Creator Insight",
+    "default_title": "COCO Creator Intel",
     "default_icon": {
       "16": "assets/icons/icon-16.png",
       "32": "assets/icons/icon-32.png",
@@ -29,6 +30,19 @@
       "128": "assets/icons/icon-128.png"
     }
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/icons/icon-32.png"
+      ],
+      "matches": [
+        "*://x.com/*",
+        "*://*.x.com/*",
+        "*://twitter.com/*",
+        "*://*.twitter.com/*"
+      ]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [
@@ -41,6 +55,7 @@
         "*://*.twitter.com/*"
       ],
       "js": [
+        "src/content/x-viral-core.js",
         "src/content/collector.js"
       ],
       "run_at": "document_start",
@@ -57,9 +72,23 @@
         "*://*.twitter.com/*"
       ],
       "js": [
+        "src/content/metrics-core.js",
         "src/content/engine.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://x.com/*",
+        "*://*.x.com/*",
+        "*://twitter.com/*",
+        "*://*.twitter.com/*"
+      ],
+      "js": [
+        "src/content/x-viral-ui-core.js",
+        "src/content/x-viral.js"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

@@ -13,5 +13,7 @@ if rg -n -i 'grow-max|growmax|kol\.grow|max\.com|feishu|lark|googleusercontent|c
 fi
 
 mkdir -p "$dist_dir"
-(cd "$extension_dir" && zip -qr "$archive" . -x '*.DS_Store')
+rm -f "$archive"
+(cd "$extension_dir" && zip -qr "$archive" . \
+  -x '*.DS_Store' 'assets/brand/*' 'assets/icon-source.svg')
 printf '%s\n' "$archive"

@@ -7,6 +7,31 @@ const SNAPSHOT_PATH = resolve(process.env.SNAPSHOT_PATH || './data/snapshot.json
 let records = new Map();
 let exportedAt = null;
 
+function publicRecord(record, platform, handle) {
+  return {
+    platform,
+    handle,
+    profileUrl: typeof record.profileUrl === 'string' ? record.profileUrl : null,
+    followers: record.followers ?? null,
+    avgViews: record.avgViews ?? null,
+  };
+}
+
+function ownerRecord(record) {
+  const value = record.private;
+  if (!value || typeof value !== 'object') return null;
+  return {
+    price: value.price && typeof value.price === 'object' ? value.price : null,
+    collaboration: value.collaboration && typeof value.collaboration === 'object' ? value.collaboration : null,
+  };
+}
+
+function recordForAccess(record, includePrivate) {
+  return includePrivate && record.private
+    ? { ...record.public, private: record.private }
+    : { ...record.public };
+}
+
 export function normalizePlatform(value) {
   const normalized = String(value || '').trim().toUpperCase();
   return ALLOWED_PLATFORMS.has(normalized) ? normalized : null;
@@ -28,11 +53,8 @@ export async function loadLibrary() {
     const handle = normalizeHandle(record.handle);
     if (!platform || !handle || key !== `${platform}:${handle}`) continue;
     next.set(key, Object.freeze({
-      platform,
-      handle,
-      profileUrl: typeof record.profileUrl === 'string' ? record.profileUrl : null,
-      followers: record.followers ?? null,
-      avgViews: record.avgViews ?? null,
+      public: Object.freeze(publicRecord(record, platform, handle)),
+      private: ownerRecord(record),
     }));
   }
   records = next;
@@ -40,13 +62,17 @@ export async function loadLibrary() {
   return getLibraryStatus();
 }
 
-export function lookup(platformValue, handleValue) {
+export function lookup(platformValue, handleValue, { includePrivate = false } = {}) {
   const platform = normalizePlatform(platformValue);
   const handle = normalizeHandle(handleValue);
   if (!platform || !handle) return null;
-  return records.get(`${platform}:${handle}`) || null;
+  const record = records.get(`${platform}:${handle}`);
+  if (!record) return null;
+  return recordForAccess(record, includePrivate);
 }
 
 export function getLibraryStatus() {
   return { count: records.size, exportedAt };
 }
+
+export const libraryInternals = { publicRecord, ownerRecord, recordForAccess };

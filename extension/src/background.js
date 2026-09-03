@@ -9,41 +9,110 @@ function cacheKey(platform, handle) {
 }
 
 async function settings() {
-  const saved = await chrome.storage.local.get(['tikhubApiKey', 'personalApiKey', 'enabled', 'cacheHours']);
+  const saved = await chrome.storage.local.get(['tikhubApiKey', 'sessionToken', 'user', 'enabled', 'cacheHours']);
   return {
     apiKey: saved.tikhubApiKey || '',
-    personalApiKey: saved.personalApiKey || '',
+    sessionToken: saved.sessionToken || '',
+    user: saved.user || null,
     enabled: saved.enabled !== false,
     cacheHours: Number(saved.cacheHours) || DEFAULTS.cacheHours,
   };
 }
 
-async function libraryLookup(platform, handle) {
-  const key = cacheKey(platform, handle);
-  if (libraryCache.has(key)) return libraryCache.get(key);
-  const { personalApiKey } = await settings();
-  if (!personalApiKey) return null;
-  const url = `${PERSONAL_API_BASE}/api/lookup?${new URLSearchParams({ platform, handle }).toString()}`;
+async function libraryLookup(platform, handle, { force = false } = {}) {
+  const cfg = await settings();
+  const key = `${cfg.user?.email || 'anonymous'}:${cacheKey(platform, handle)}`;
+  if (!force && libraryCache.has(key)) return libraryCache.get(key);
+  if (!cfg.sessionToken) return { error: 'login_required' };
+  const url = `${PERSONAL_API_BASE}/api/context?${new URLSearchParams({ platform, handle }).toString()}`;
   let response;
   try {
     response = await fetch(url, {
-      headers: { 'x-api-key': personalApiKey },
+      headers: { Authorization: `Bearer ${cfg.sessionToken}` },
       signal: AbortSignal.timeout(10_000),
       cache: 'no-store',
     });
   } catch {
     return { error: '个人达人库暂时无法连接' };
   }
-  if (response.status === 404) {
-    const miss = { found: false };
-    libraryCache.set(key, miss);
-    return miss;
+  if (response.status === 401) {
+    await chrome.storage.local.remove(['sessionToken', 'user']);
+    libraryCache.clear();
+    return { error: 'login_required' };
   }
   const body = await response.json().catch(() => null);
-  if (!response.ok) return { error: response.status === 401 ? '个人库密钥无效' : `个人达人库请求失败（${response.status}）` };
-  const hit = { found: true, record: body.record };
-  libraryCache.set(key, hit);
-  return hit;
+  if (!response.ok) return { error: `COCO 情报库请求失败（${response.status}）` };
+  const context = {
+    found: Boolean(body.found),
+    ...(body.record ? { record: body.record } : {}),
+    reviews: Array.isArray(body.reviews) ? body.reviews : [],
+    access: body.access || 'public',
+  };
+  libraryCache.set(key, context);
+  return context;
+}
+
+async function reviewRequest(method, platform, handle, payload = {}) {
+  const cfg = await settings();
+  if (!cfg.sessionToken) return { ok: false, error: '请先登录 Google 账号' };
+  const path = method === 'POST' ? '/api/reviews' : `/api/reviews/${encodeURIComponent(payload.id || '')}`;
+  const response = await fetch(`${PERSONAL_API_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${cfg.sessionToken}`,
+      ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+    },
+    ...(method === 'POST' ? { body: JSON.stringify({ platform, handle, rating: payload.rating, body: payload.body }) } : {}),
+    cache: 'no-store',
+  }).catch(() => null);
+  if (!response) return { ok: false, error: '个人评价服务暂时无法连接' };
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    await chrome.storage.local.remove(['sessionToken', 'user']);
+    libraryCache.clear();
+  }
+  if (!response.ok) return { ok: false, error: body.error || `评价请求失败（${response.status}）` };
+  const context = await libraryLookup(platform, handle, { force: true });
+  return { ok: true, context };
+}
+
+async function googleLogin() {
+  const configResponse = await fetch(`${PERSONAL_API_BASE}/api/auth/config`, { cache: 'no-store' });
+  const config = await configResponse.json().catch(() => null);
+  if (!configResponse.ok || !config?.enabled) throw new Error('Google 登录尚未配置完成');
+  const redirect = chrome.identity.getRedirectURL('oauth2');
+  const startUrl = `${PERSONAL_API_BASE}/auth/google/start?${new URLSearchParams({ redirect }).toString()}`;
+  const finalUrl = await chrome.identity.launchWebAuthFlow({ url: startUrl, interactive: true });
+  const code = new URL(finalUrl).searchParams.get('code');
+  if (!code) throw new Error('Google 登录未返回授权码');
+  const exchange = await fetch(`${PERSONAL_API_BASE}/api/auth/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+    cache: 'no-store',
+  });
+  const body = await exchange.json().catch(() => null);
+  if (!exchange.ok || !body?.token || !body?.user) throw new Error(body?.error || 'Google 登录失败');
+  await chrome.storage.local.set({ sessionToken: body.token, user: body.user });
+  libraryCache.clear();
+  return body.user;
+}
+
+async function refreshSession() {
+  const cfg = await settings();
+  if (!cfg.sessionToken) return { loggedIn: false, user: null };
+  const response = await fetch(`${PERSONAL_API_BASE}/api/session`, {
+    headers: { Authorization: `Bearer ${cfg.sessionToken}` },
+    cache: 'no-store',
+  }).catch(() => null);
+  if (!response?.ok) {
+    await chrome.storage.local.remove(['sessionToken', 'user']);
+    libraryCache.clear();
+    return { loggedIn: false, user: null };
+  }
+  const body = await response.json();
+  await chrome.storage.local.set({ user: body.user });
+  return { loggedIn: true, user: body.user };
 }
 
 async function apiCall(path, params = {}) {
@@ -218,7 +287,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     settings().then((value) => sendResponse({
       ...value,
       apiKey: value.apiKey ? 'configured' : '',
-      personalApiKey: value.personalApiKey ? 'configured' : '',
+      sessionToken: value.sessionToken ? 'configured' : '',
+      loggedIn: Boolean(value.sessionToken && value.user),
     }));
     return true;
   }
@@ -228,14 +298,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       cacheHours: [1, 6, 24, 72, 168].includes(Number(message.cacheHours)) ? Number(message.cacheHours) : DEFAULTS.cacheHours,
     };
     if (typeof message.apiKey === 'string') update.tikhubApiKey = message.apiKey.trim();
-    if (typeof message.personalApiKey === 'string') update.personalApiKey = message.personalApiKey.trim();
     chrome.storage.local.set(update).then(() => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+  if (message?.type === 'loginGoogle') {
+    googleLogin().then((user) => sendResponse({ ok: true, user }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === 'logoutGoogle') {
+    chrome.storage.local.remove(['sessionToken', 'user']).then(() => {
       libraryCache.clear();
       sendResponse({ ok: true });
     });
     return true;
   }
-  if (message?.type === 'testPersonalApiKey') {
+  if (message?.type === 'refreshSession') {
+    refreshSession().then((result) => sendResponse(result));
+    return true;
+  }
+  if (message?.type === 'testLibrarySession') {
     libraryCache.clear();
     libraryLookup('IG', '__creator_intel_key_test__').then((result) => {
       sendResponse({ ok: !result?.error, error: result?.error || '' });
@@ -251,10 +335,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'getCachedProfile') {
     Promise.all([settings(), readCache(message.platform, message.handle), libraryLookup(message.platform, message.handle)]).then(([cfg, profile, library]) => {
-      if (!profile) return sendResponse({ profile: null, library, configured: Boolean(cfg.apiKey), personalConfigured: Boolean(cfg.personalApiKey), enabled: cfg.enabled });
+      if (!profile) return sendResponse({ profile: null, library, configured: Boolean(cfg.apiKey), loggedIn: Boolean(cfg.sessionToken), user: cfg.user, enabled: cfg.enabled });
       const fresh = Date.now() - Date.parse(profile.fetchedAt) < cfg.cacheHours * 3_600_000;
-      sendResponse({ profile, library, fresh, configured: Boolean(cfg.apiKey), personalConfigured: Boolean(cfg.personalApiKey), enabled: cfg.enabled });
+      sendResponse({ profile, library, fresh, configured: Boolean(cfg.apiKey), loggedIn: Boolean(cfg.sessionToken), user: cfg.user, enabled: cfg.enabled });
     });
+    return true;
+  }
+  if (message?.type === 'refreshCreatorContext') {
+    libraryLookup(message.platform, message.handle, { force: true }).then((context) => sendResponse({ context }));
+    return true;
+  }
+  if (message?.type === 'addReview') {
+    reviewRequest('POST', message.platform, message.handle, message).then(sendResponse);
+    return true;
+  }
+  if (message?.type === 'deleteReview') {
+    reviewRequest('DELETE', message.platform, message.handle, { id: message.id }).then(sendResponse);
     return true;
   }
   if (message?.type === 'fetchProfile') {

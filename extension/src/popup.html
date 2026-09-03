@@ -8,7 +8,8 @@
     * { box-sizing: border-box; }
     body { width: 320px; margin: 0; color: #17181b; background: #fff; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
     header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #eceef1; }
-    .mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #17181b; color: #fff; font-weight: 800; }
+    .mark { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 auto; }
+    .mark img { width: 42px; height: 42px; object-fit: contain; }
     .title { min-width: 0; }
     .title b { display: block; font-size: 14px; }
     .title span { display: block; color: #747982; font-size: 11px; }
@@ -34,36 +35,72 @@
     .hint { margin-top: 10px; color: #858a93; font-size: 11px; }
     .hint a { color: #4c67e8; text-decoration: none; }
     .version { margin-top: 12px; color: #b0b4bb; font-size: 10px; text-align: right; }
+    .auth { margin-top: 10px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; }
+    .account { display: none; align-items: center; gap: 9px; }
+    .account.show { display: flex; }
+    .account img { width: 30px; height: 30px; border-radius: 50%; background: #eef0f3; }
+    .account-copy { min-width: 0; flex: 1; }
+    .account-copy b, .account-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .account-copy span { color: #747982; font-size: 10px; }
+    .owner { color: #c94c45; font-size: 9px; font-weight: 800; }
+    .logout { height: 28px; padding: 0 8px; font-size: 10px; }
+    .google { width: 100%; margin-top: 0; border-color: #d7dbe0; background: #fff; }
+    details { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eceef1; }
+    summary { color: #555b64; cursor: pointer; font-size: 11px; font-weight: 700; }
+    .inline-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-weight: 600; }
+    .inline-check input { width: 16px; height: 16px; margin: 0; accent-color: #17181b; }
+    .viral-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .viral-grid label { margin-top: 9px; }
+    .viral-note { margin-top: 8px; color: #858a93; font-size: 10px; }
   </style>
 </head>
 <body>
   <header>
-    <div class="mark">CI</div>
-    <div class="title"><b>Creator Intel Personal</b><span>mccoco.xyz · 个人版</span></div>
+    <div class="mark"><img src="../assets/icons/icon-48.png" alt="COCO"></div>
+    <div class="title"><b>COCO Creator Intel</b><span>你的达人情报助手</span></div>
   </header>
   <main>
     <div class="status"><span class="dot" id="dot"></span><span id="statusText">读取设置中...</span></div>
 
-    <label for="personalApiKey">个人达人库 API Key</label>
-    <div class="keyrow">
-      <input id="personalApiKey" type="password" autocomplete="off" placeholder="必填：个人 VPS 访问密钥">
-      <button class="iconbtn" id="showPersonalKey" type="button" title="显示或隐藏个人库密钥">显示</button>
+    <div class="auth">
+      <button class="google" id="googleLogin" type="button">使用 Google 账号登录</button>
+      <div class="account" id="account">
+        <img id="accountPicture" alt="">
+        <div class="account-copy"><b id="accountName"></b><span id="accountEmail"></span><span class="owner" id="ownerBadge"></span></div>
+        <button class="logout" id="logoutBtn" type="button">退出</button>
+      </div>
     </div>
 
-    <label for="apiKey">TikHub API Key（可选）</label>
-    <div class="keyrow">
-      <input id="apiKey" type="password" autocomplete="off" placeholder="可选：Bearer Token">
-      <button class="iconbtn" id="showKey" type="button" title="显示或隐藏 API Key">显示</button>
-    </div>
+    <details>
+      <summary>粉丝画像（TikHub，可选）</summary>
+      <label for="apiKey">TikHub API Key（用于粉丝画像）</label>
+      <div class="keyrow">
+        <input id="apiKey" type="password" autocomplete="off" placeholder="可选：Bearer Token">
+        <button class="iconbtn" id="showKey" type="button" title="显示或隐藏 API Key">显示</button>
+      </div>
 
-    <label for="cacheHours">资料缓存时间</label>
-    <select id="cacheHours">
-      <option value="1">1 小时</option>
-      <option value="6">6 小时</option>
-      <option value="24">24 小时</option>
-      <option value="72">3 天</option>
-      <option value="168">7 天</option>
-    </select>
+      <label for="cacheHours">粉丝画像缓存时间</label>
+      <select id="cacheHours">
+        <option value="1">1 小时</option>
+        <option value="6">6 小时</option>
+        <option value="24">24 小时</option>
+        <option value="72">3 天</option>
+        <option value="168">7 天</option>
+      </select>
+    </details>
+
+    <details>
+      <summary>X 流速雷达（页面本地计算）</summary>
+      <label class="inline-check" for="xViralEnabled"><input id="xViralEnabled" type="checkbox">显示帖子流速徽章</label>
+      <label class="inline-check" for="xLeaderboardEnabled"><input id="xLeaderboardEnabled" type="checkbox">显示本次浏览热帖榜</label>
+      <div class="viral-grid">
+        <div><label for="xTrendingPerHour">热门阈值 / 小时</label><input id="xTrendingPerHour" type="text" inputmode="numeric"></div>
+        <div><label for="xViralPerHour">爆发阈值 / 小时</label><input id="xViralPerHour" type="text" inputmode="numeric"></div>
+      </div>
+      <label for="xTopN">热帖榜数量</label>
+      <select id="xTopN"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="20">20</option></select>
+      <div class="viral-note">流速 = 当前累计浏览量 ÷ 发布至今小时数。只读取 X 页面已经加载的公开帖子数据，不调用 X API，也不上传帖子内容。</div>
+    </details>
 
     <div class="toggle">
       <label for="enabled">在达人主页显示面板</label>
@@ -71,7 +108,7 @@
     </div>
 
     <button class="primary" id="saveBtn" type="button">保存设置</button>
-    <div class="hint">个人库 Key 用于查询你 VPS 上的只读公开达人库。TikHub Key 可选，用于补充实时公开资料。两个 Key 都只保存在当前浏览器。</div>
+    <div class="hint">任何 Google 账号都可登录查看公开达人资料。报价与过往合作仅向已验证的所有者账号开放。</div>
     <div class="hint"><a href="https://app.tikhub.io" target="_blank" rel="noreferrer">打开 TikHub 控制台</a></div>
     <div class="version" id="version"></div>
   </main>
