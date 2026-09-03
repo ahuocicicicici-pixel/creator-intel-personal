@@ -1,40 +1,42 @@
 # COCO Creator Intel
 
-A Chrome extension for evaluating public creator profiles without leaving TikTok, Instagram, YouTube or X.
+中文 | [English](README.en.md)
 
-[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/coco-creator-intel/ogmmgjpedgjhhdpmmjiadgphenmineaa) · [View Mark's portfolio](https://mccoco.xyz/portfolio)
+一款达人情报 Chrome 扩展，让你无需离开 TikTok、Instagram、YouTube 或 X 的达人主页，就能评估公开数据。
 
-![COCO Creator Intel displayed beside a creator profile](https://mccoco.xyz/portfolio/assets/projects/kol-intel/coco-store-mock-1280x800.jpg)
+[从 Chrome 应用商店安装](https://chromewebstore.google.com/detail/coco-creator-intel/ogmmgjpedgjhhdpmmjiadgphenmineaa) · [查看 Mark 的作品集](https://mccoco.xyz/portfolio)
 
-## What it does
+![COCO Creator Intel 显示在达人主页旁](https://mccoco.xyz/portfolio/assets/projects/kol-intel/coco-store-mock-1280x800.jpg)
 
-- Detects supported creator profile pages across four platforms.
-- Displays public follower, view and engagement metrics in one compact panel.
-- Adds optional Instagram audience-country analysis from public engagement samples.
-- Calculates X post exposure velocity and a current-tab leaderboard locally.
-- Performs exact, read-only creator-library lookups through a separately hosted API.
-- Keeps reviews and historical collaboration fields behind server-side authorization.
+## 主要功能
 
-## Product boundary
+- 识别四个平台的达人主页。
+- 在一个紧凑面板中展示公开粉丝量、播放量和互动率。
+- 可选分析 Instagram 公开互动样本中的受众国家分布。
+- 在浏览器本地计算 X 帖子的曝光流速和当前标签页热帖榜。
+- 通过独立托管的 API，对个人达人库进行精确、只读查询。
+- 在服务端权限控制下提供达人评价和历史合作字段。
 
-The extension is designed as a personal creator-intelligence product rather than a copy of an internal company system. Customer campaigns, company projects, contacts, communication notes, blacklists, employee accounts, company sessions and company API keys are excluded.
+## 产品边界
 
-Regular signed-in users receive only public creator information. Restricted historical fields are returned only when the server authorizes the signed-in account. The API exposes exact lookups rather than list, search, export or synchronization endpoints.
+这个扩展是独立的个人达人情报产品，不是公司内部系统的复制品。客户 Campaign、公司项目、联系人、沟通备注、黑名单、员工账号、公司会话和公司 API 密钥均不进入本项目。
 
-X Radar reads public post data already rendered in the active tab. Exposure velocity and ranking calculations stay in the browser; post content and calculated results are not uploaded.
+普通登录用户只会收到公开达人信息。受限的历史字段仅在服务端确认当前账号具有权限后返回。API 只提供精确查询，不提供列表、搜索、导出或同步接口。
 
-For the complete disclosure, see [`extension/PRIVACY.md`](extension/PRIVACY.md).
+X 流速雷达只读取当前标签页已经渲染的公开帖子数据。曝光流速和排行均在浏览器本地计算，帖子内容和计算结果不会上传。
 
-## Repository map
+完整披露请查看 [`extension/PRIVACY.md`](extension/PRIVACY.md)。
+
+## 仓库结构
 
 ```text
-extension/  Chrome Manifest V3 extension
-server/     Read-only authentication and exact-lookup API
-store/      Chrome Web Store listing and review materials
-scripts/    Packaging and release checks
+extension/  Chrome Manifest V3 扩展
+server/     登录认证与只读精确查询 API
+store/      Chrome 应用商店文案与审核材料
+scripts/    打包与发布检查脚本
 ```
 
-## Local verification
+## 本地验证
 
 ```sh
 cd server
@@ -46,8 +48,8 @@ GOOGLE_CLIENT_SECRET='google-web-client-secret' \
 SNAPSHOT_PATH='./data/snapshot.json' node src/index.js
 ```
 
-Load `extension/` through Chrome's **Load unpacked** option and sign in from the popup. A TikHub API key is optional and is stored only in the current browser.
+在 Chrome 的“加载已解压的扩展程序”中选择 `extension/`，然后从弹窗登录。TikHub API Key 为可选项，并且只保存在当前浏览器中。
 
-## Source terms
+## 源码条款
 
-The source is publicly viewable for product evaluation and portfolio review. No open-source license or permission to reproduce, redistribute or operate a competing hosted service is granted.
+源码公开用于产品评估和作品集审阅。本仓库未授予开源许可，也未授予复制、再分发或运营竞争性托管服务的权限。
