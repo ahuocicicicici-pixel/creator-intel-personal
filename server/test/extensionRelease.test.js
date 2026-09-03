@@ -52,12 +52,15 @@ test('personal manifest preserves creator reviews and loads the local X radar in
     resources: ['assets/icons/icon-32.png'],
     matches: ['*://x.com/*', '*://*.x.com/*', '*://twitter.com/*', '*://*.twitter.com/*'],
   }]);
-  const [engine, background, collector, radar] = await Promise.all([
-    source('src/content/engine.js'), source('src/background.js'), source('src/content/collector.js'), source('src/content/x-viral.js'),
+  const [engine, background, collector, radar, popup] = await Promise.all([
+    source('src/content/engine.js'), source('src/background.js'), source('src/content/collector.js'), source('src/content/x-viral.js'), source('src/popup.html'),
   ]);
   assert.match(engine, /data-tab="reviews"/);
   assert.match(engine, /type: 'addReview'/);
   assert.match(engine, /data-audience-query/);
+  assert.match(engine, /data-tab="audience"[^>]*>.*<span>受众画像<\/span>/);
+  assert.doesNotMatch(engine, /class="fan-grid"/);
+  assert.doesNotMatch(engine, /data-fan=/);
   assert.match(engine, /type: 'fetchAudience'/);
   assert.match(engine, /creator-intel-audience/);
   assert.match(engine, /可以刷新或关闭标签页，任务会在后台继续/);
@@ -71,6 +74,8 @@ test('personal manifest preserves creator reviews and loads the local X radar in
   assert.match(background, /get_user_about', \{ username: user\.username \}/);
   assert.match(background, /audienceCountryCache/);
   assert.match(background, /runtime\.onConnect/);
+  assert.doesNotMatch(`${engine}\n${background}\n${popup}`, /粉丝画像/);
+  assert.match(popup, /受众画像（TikHub，可选）/);
   assert.match(collector, /X_PUBLIC_POST_OPERATIONS/);
   assert.match(collector, /__kolXViralCollector/);
   assert.match(collector, /isPublicContentPage/);
@@ -95,6 +100,7 @@ test('store materials disclose resumable audience-job metadata consistently', as
     assert.match(material, /public (?:Instagram )?handle, start\/update timestamps and reserved TikHub request count/);
     assert.match(material, /Chrome alarms/);
     assert.match(material, /user-started/);
+    assert.doesNotMatch(material, /Followers tab|Analyze follower profile/);
   }
 });
 

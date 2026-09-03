@@ -1,6 +1,6 @@
 # Creator Intel Personal
 
-COCO 形象的个人达人情报助手。Chrome 扩展在 TikTok、Instagram、YouTube 与 X 的达人主页显示页面公开指标，并可从个人 VPS 上的只读达人库精确匹配历史数据；TikHub 用于可选的粉丝画像补充。
+COCO 形象的个人达人情报助手。Chrome 扩展在 TikTok、Instagram、YouTube 与 X 的达人主页显示页面公开指标，并可从个人 VPS 上的只读达人库精确匹配历史数据；TikHub 用于可选的受众画像补充。
 
 ## 数据边界
 

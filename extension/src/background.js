@@ -562,7 +562,7 @@ function ensureAudienceJob(platform, handle, cacheHours) {
 }
 
 async function fetchAudience(platform, handle, force = false, subscriber = null) {
-  if (platform !== 'IG') return { ok: false, error: '粉丝画像目前仅支持 Instagram' };
+  if (platform !== 'IG') return { ok: false, error: '受众画像目前仅支持 Instagram' };
   const cfg = await settings();
   const normalizedHandle = String(handle || '').trim().replace(/^@/, '');
   if (!cfg.apiKey) {
@@ -590,7 +590,7 @@ async function fetchAudience(platform, handle, force = false, subscriber = null)
   try {
     return { ok: true, result: await entry.promise, cached: false };
   } catch (error) {
-    return { ok: false, error: error.message || '粉丝画像分析失败' };
+    return { ok: false, error: error.message || '受众画像分析失败' };
   } finally {
     releaseAudienceSubscriber(subscriber);
   }

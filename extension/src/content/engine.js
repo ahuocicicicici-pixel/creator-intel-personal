@@ -152,9 +152,6 @@
     .rv-submit { width:100%; padding:6px 10px; border:0; border-radius:7px; background:#e11d63; color:#fff; cursor:pointer; font-size:11px; font-weight:700; }
     .rv-submit:disabled { background:#c9ced3; cursor:default; }
     .rv-message { min-height:0; color:#6b7280; font-size:10px; } .rv-message.error { color:#e24b4a; } .rv-message.ok { color:#138a4a; }
-    .fan-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-bottom:8px; }
-    .fan-stat { padding:8px; border-radius:7px; background:#f4f5f6; }
-    .fan-stat b { display:block; color:#30343a; font-size:14px; } .fan-stat span { color:#8a9099; font-size:9px; }
     .cp-wrap { margin-top:1px; }
     .cp-head { display:flex; align-items:center; justify-content:space-between; color:#59616b; font-size:10px; font-weight:650; }
     .cp-head b { color:#9a9fa7; font-size:9px; font-weight:600; }
@@ -466,10 +463,6 @@
     setRow(root, 'avgEngagement', formatCount(profile.avgEngagement), profile.avgEngagement != null);
     setRow(root, 'country', profile.country, Boolean(profile.country));
     setRow(root, 'updated', profile.fetchedAt ? new Date(profile.fetchedAt).toLocaleString() : '', Boolean(profile.fetchedAt));
-    if (profile.followers != null) setText(root, '[data-fan="followers"]', formatCount(profile.followers));
-    if (profile.following != null) setText(root, '[data-fan="following"]', formatCount(profile.following));
-    if (profile.posts != null) setText(root, '[data-fan="posts"]', formatCount(profile.posts));
-    if (profile.country) setText(root, '[data-fan="country"]', profile.country);
   }
 
   function showLibrary(root, library, config) {
@@ -536,7 +529,7 @@
     const style = document.createElement('style');
     style.textContent = CSS;
     const wrapper = document.createElement('div');
-    const audienceTab = `<button class="kol-tab" type="button" role="tab" aria-selected="false" data-tab="audience">${icon('followers')}<span>粉丝</span></button>`;
+    const audienceTab = `<button class="kol-tab" type="button" role="tab" aria-selected="false" data-tab="audience">${icon('followers')}<span>受众画像</span></button>`;
     const profilePanel = `
         <div class="api">
           <div class="apihead"><b>公开资料补充（可选）</b><span class="verified" style="display:none">✓</span></div>
@@ -556,20 +549,14 @@
         </div>`;
     const igAudiencePanel = `
         <div class="audience-analysis">
-          <div class="audience-title">粉丝画像 · 受众地区</div>
+          <div class="audience-title">受众画像 · 地区分布</div>
           <div class="audience-copy">抽样近期 Reels 的公开互动用户，聚合其公开账号所在地。最多约 313 次 TikHub 请求；按当前公开单价，费用上限约 US$2.43，实际以 TikHub 计费为准。</div>
-          <button class="aud-query" type="button" data-audience-query>分析粉丝画像（最多约 US$2.43）</button>
+          <button class="aud-query" type="button" data-audience-query>分析受众画像（最多约 US$2.43）</button>
           <div class="aud-status" data-audience-status>尚未分析</div>
           <div data-audience-result></div>
         </div>`;
     const audiencePanel = `
       <section class="kol-panel" role="tabpanel" data-panel="audience" hidden>
-        <div class="fan-grid">
-          <div class="fan-stat"><b data-fan="followers">—</b><span>当前粉丝</span></div>
-          <div class="fan-stat"><b data-fan="following">—</b><span>关注数</span></div>
-          <div class="fan-stat"><b data-fan="posts">—</b><span>内容数</span></div>
-          <div class="fan-stat"><b data-fan="country">—</b><span>账号地区</span></div>
-        </div>
         ${config.code === 'IG' ? igAudiencePanel : profilePanel}
       </section>`;
     wrapper.innerHTML = `
@@ -719,7 +706,7 @@
         audienceButton.disabled = false;
         if (!response?.ok || !response.result) {
           audienceButton.hidden = false;
-          audienceButton.textContent = '重试分析粉丝画像';
+          audienceButton.textContent = '重试分析受众画像';
           setAudienceStatus(response?.error || '分析中断，请稍后重试', true);
           return;
         }
@@ -792,7 +779,6 @@
     setText(root, '[data-local="views"]', formatCount(stats.avgViews));
     setText(root, '[data-local="engagementRate"]', formatPercent(stats.engagementRate));
     setText(root, '[data-local="sample"]', stats.sampleSize ? String(stats.sampleSize) : '—');
-    setText(root, '[data-fan="followers"]', formatCount(followers));
     return stats;
   }
 

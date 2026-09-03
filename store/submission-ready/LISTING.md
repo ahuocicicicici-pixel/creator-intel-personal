@@ -56,4 +56,4 @@ Display creator metrics, optional Instagram audience-country insights, account-b
 
 ## Reviewer notes
 
-No credentials required. Install v1.3.5; open a TikTok, Instagram, YouTube or X profile. The COCO card shows Overview, Followers and Reviews; public metrics work without sign-in. Google sign-in accepts any account; non-owners see public fields and can manage their reviews. On X, load posts to test the local velocity radar. On Instagram Followers, add your own TikHub key to test optional audience-country analysis; the request/cost cap appears first. Owner-only history is server-enforced.
+No credentials required. Install v1.3.5; open a TikTok, Instagram, YouTube or X profile. The COCO card shows Overview, Audience Insights and Reviews; public metrics work without sign-in. Google sign-in accepts any account; non-owners see public fields and can manage their reviews. On X, load posts to test the local velocity radar. On Instagram Audience Insights, add your own TikHub key to test optional audience-country analysis; the request/cost cap appears first. Owner-only history is server-enforced.
