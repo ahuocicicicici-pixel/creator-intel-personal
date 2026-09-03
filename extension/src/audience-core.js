@@ -106,6 +106,7 @@
   function countryFromAbout(payload) {
     const serialized = JSON.stringify(payload?.data ?? payload);
     const isLabel = (value) => /account based in|based in/i.test(String(value || ''));
+    const isCountryKey = (value) => /(?:^|:)about_this_account_country$/i.test(String(value || ''));
     const stringValues = (value) => {
       const values = [];
       const visit = (current) => {
@@ -118,6 +119,14 @@
     };
     for (const object of walkObjects(payload?.data ?? payload).sort((left, right) => JSON.stringify(left).length - JSON.stringify(right).length)) {
       const direct = Object.values(object).filter((value) => typeof value === 'string');
+      if (direct.some(isCountryKey)) {
+        for (const [key, value] of Object.entries(object)) {
+          if (!/initial|value|subtitle|description|secondary/i.test(key) || typeof value !== 'string') continue;
+          const iso = countryNameToISO(value);
+          if (iso) return iso;
+        }
+        return null;
+      }
       if (!direct.some(isLabel)) continue;
       const preferred = [];
       const collectPreferred = (value) => {
@@ -148,7 +157,7 @@
         if (iso) return iso;
       }
     }
-    const loaded = /based in|date joined|former usernames?|date_joined|account based|verified/i.test(serialized)
+    const loaded = /based in|date joined|former usernames?|date_joined|account based|about_this_account_country|verified/i.test(serialized)
       || Boolean(payload?.data?.layout || payload?.data?.screen || payload?.data?.bloks);
     return loaded ? null : undefined;
   }

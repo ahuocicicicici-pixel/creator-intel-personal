@@ -14,6 +14,7 @@ The extension stores the following data in Chrome local extension storage:
 - The selected cache duration.
 - X velocity-radar preferences, including whether badges and the local leaderboard are enabled and their thresholds.
 - Up to 100 cached public creator profile and Instagram audience-analysis results, plus a bounded cache of public audience-account country results and timestamps.
+- The handle, start/update timestamps and reserved TikHub request count of an explicitly started Instagram audience job while it is pending, removed after the job finishes or fails.
 
 This locally stored data is not synchronized through a Chrome account. The signed session is sent only to `https://mccoco.xyz/creator-intel-api`; the TikHub key is sent only to TikHub.
 
@@ -28,6 +29,8 @@ Historical prices and past collaboration records are returned only when the veri
 ## Network requests
 
 The extension sends exact platform-and-handle lookups to `https://mccoco.xyz/creator-intel-api` using the signed login session. The service exposes no list or export endpoint. The extension sends requests directly from the browser to `https://api.tikhub.io` using the separate TikHub API Key supplied by the user. TikHub creator requests are initiated only when the user clicks a query button. Instagram audience analysis requests recent public Reels, public liker identifiers/usernames, and those public accounts' “account based in” information to calculate an aggregate country distribution locally. One analysis is capped at approximately 313 TikHub requests. Key validation requests may be sent when the user saves settings.
+
+After the user explicitly starts Instagram audience analysis, the extension may continue that bounded job in its background service worker after the originating tab is refreshed or closed. Chrome alarms are used only to resume a pending user-started job if the service worker sleeps; they do not start periodic creator collection.
 
 ## Social media pages
 

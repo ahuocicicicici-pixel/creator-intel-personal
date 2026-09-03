@@ -135,3 +135,12 @@ test('context exposes reviews but keeps private library fields owner-only', asyn
   assert.equal('private' in body.record, false);
   assert.ok(Array.isArray(body.reviews));
 });
+
+test('public privacy page discloses resumable background audience jobs', async () => {
+  const response = await fetch(`${baseUrl}/creator-intel-api/privacy`);
+  const body = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(body, /continue in the extension background/);
+  assert.match(body, /Chrome alarms are used only to resume/);
+  assert.match(body, /reserved TikHub request count/);
+});

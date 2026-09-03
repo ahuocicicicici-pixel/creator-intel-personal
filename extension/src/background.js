@@ -8,19 +8,26 @@ const libraryCache = new Map();
 const audienceJobs = new Map();
 let audienceResultMemory = null;
 let audienceCountryMemory = null;
+let audiencePendingMemory = null;
 let audienceResultLoad = null;
 let audienceCountryLoad = null;
+let audiencePendingLoad = null;
 let audienceResultSave = Promise.resolve();
 let audienceCountrySave = Promise.resolve();
+let audiencePendingSave = Promise.resolve();
 
 const AUDIENCE_TARGET = 100;
 const AUDIENCE_MAX_LOOKUPS = 300;
+const AUDIENCE_REQUEST_CAP = 313;
 const AUDIENCE_REELS = 12;
 const AUDIENCE_PER_REEL = 50;
 const AUDIENCE_CONCURRENCY = 6;
 const AUDIENCE_BREAK_AT = 20;
 const AUDIENCE_MIN_VALID = 20;
 const AUDIENCE_COUNTRY_HIT_MS = 90 * 24 * 3_600_000;
+const AUDIENCE_RESULT_CACHE_VERSION = 2;
+const AUDIENCE_COUNTRY_CACHE_VERSION = 2;
+const AUDIENCE_RESUME_ALARM = 'creator-intel-audience-resume';
 
 function cacheKey(platform, handle) {
   return `${platform}:${String(handle).toLowerCase()}`;
@@ -303,8 +310,12 @@ async function writeCache(profile) {
 async function readAudienceCache(platform, handle) {
   const key = cacheKey(platform, handle);
   if (!audienceResultMemory) {
-    audienceResultLoad ||= chrome.storage.local.get(['audienceCache']).then(({ audienceCache = {} }) => {
-      audienceResultMemory = new Map(Object.entries(audienceCache));
+    audienceResultLoad ||= chrome.storage.local.get(['audienceCache', 'audienceCacheVersion']).then(async ({ audienceCache = {}, audienceCacheVersion }) => {
+      const compatible = Number(audienceCacheVersion) === AUDIENCE_RESULT_CACHE_VERSION;
+      audienceResultMemory = new Map(compatible ? Object.entries(audienceCache) : []);
+      if (!compatible) {
+        await chrome.storage.local.set({ audienceCache: {}, audienceCacheVersion: AUDIENCE_RESULT_CACHE_VERSION });
+      }
       return audienceResultMemory;
     });
     await audienceResultLoad;
@@ -320,15 +331,22 @@ async function writeAudienceCache(result) {
     const entries = [...audienceResultMemory.entries()]
       .sort((left, right) => String(right[1]?.at || '').localeCompare(String(left[1]?.at || '')));
     for (const [oldKey] of entries.slice(100)) audienceResultMemory.delete(oldKey);
-    await chrome.storage.local.set({ audienceCache: Object.fromEntries(audienceResultMemory) });
+    await chrome.storage.local.set({
+      audienceCache: Object.fromEntries(audienceResultMemory),
+      audienceCacheVersion: AUDIENCE_RESULT_CACHE_VERSION,
+    });
   });
   await audienceResultSave;
 }
 
 async function audienceCountries() {
   if (audienceCountryMemory) return audienceCountryMemory;
-  audienceCountryLoad ||= chrome.storage.local.get(['audienceCountryCache']).then(({ audienceCountryCache = {} }) => {
-    audienceCountryMemory = new Map(Object.entries(audienceCountryCache));
+  audienceCountryLoad ||= chrome.storage.local.get(['audienceCountryCache', 'audienceCountryCacheVersion']).then(async ({ audienceCountryCache = {}, audienceCountryCacheVersion }) => {
+    const compatible = Number(audienceCountryCacheVersion) === AUDIENCE_COUNTRY_CACHE_VERSION;
+    audienceCountryMemory = new Map(compatible ? Object.entries(audienceCountryCache) : []);
+    if (!compatible) {
+      await chrome.storage.local.set({ audienceCountryCache: {}, audienceCountryCacheVersion: AUDIENCE_COUNTRY_CACHE_VERSION });
+    }
     return audienceCountryMemory;
   });
   return audienceCountryLoad;
@@ -340,9 +358,81 @@ async function saveAudienceCountries() {
     const entries = [...audienceCountryMemory.entries()]
       .sort((left, right) => Number(right[1]?.at || 0) - Number(left[1]?.at || 0));
     for (const [oldKey] of entries.slice(5000)) audienceCountryMemory.delete(oldKey);
-    await chrome.storage.local.set({ audienceCountryCache: Object.fromEntries(audienceCountryMemory) });
+    await chrome.storage.local.set({
+      audienceCountryCache: Object.fromEntries(audienceCountryMemory),
+      audienceCountryCacheVersion: AUDIENCE_COUNTRY_CACHE_VERSION,
+    });
   });
   await audienceCountrySave;
+}
+
+async function pendingAudienceJobs() {
+  if (audiencePendingMemory) return audiencePendingMemory;
+  audiencePendingLoad ||= chrome.storage.local.get(['audiencePendingJobs']).then(({ audiencePendingJobs = {} }) => {
+    audiencePendingMemory = new Map(Object.entries(audiencePendingJobs));
+    return audiencePendingMemory;
+  });
+  return audiencePendingLoad;
+}
+
+async function savePendingAudienceJobs() {
+  await pendingAudienceJobs();
+  const snapshot = Object.fromEntries(audiencePendingMemory);
+  audiencePendingSave = audiencePendingSave.catch(() => {}).then(() => chrome.storage.local.set({ audiencePendingJobs: snapshot }));
+  await audiencePendingSave;
+}
+
+async function keepAudienceResumeAlarm() {
+  if (!chrome.alarms?.create) return;
+  await chrome.alarms.create(AUDIENCE_RESUME_ALARM, { periodInMinutes: 1 });
+}
+
+async function markAudiencePending(platform, handle, cacheHours) {
+  const jobs = await pendingAudienceJobs();
+  const key = cacheKey(platform, handle);
+  const previous = jobs.get(key);
+  jobs.set(key, {
+    platform,
+    handle,
+    cacheHours,
+    requests: Math.max(0, Number(previous?.requests) || 0),
+    startedAt: previous?.startedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  await savePendingAudienceJobs();
+  await keepAudienceResumeAlarm();
+  return jobs.get(key);
+}
+
+async function reserveAudienceRequest(platform, handle, cacheHours) {
+  const jobs = await pendingAudienceJobs();
+  const key = cacheKey(platform, handle);
+  const previous = jobs.get(key) || await markAudiencePending(platform, handle, cacheHours);
+  const requests = Math.max(0, Number(previous?.requests) || 0);
+  if (requests >= AUDIENCE_REQUEST_CAP) {
+    const error = new Error(`已达到单次分析 ${AUDIENCE_REQUEST_CAP} 次 TikHub 请求上限，已停止`);
+    error.code = 'AUDIENCE_REQUEST_CAP';
+    throw error;
+  }
+  jobs.set(key, { ...previous, requests: requests + 1, updatedAt: new Date().toISOString() });
+  await savePendingAudienceJobs();
+}
+
+async function audienceApiCall(path, params, handle, cacheHours) {
+  await reserveAudienceRequest('IG', handle, cacheHours);
+  return apiCall(path, params);
+}
+
+async function clearAudiencePending(platform, handle) {
+  const jobs = await pendingAudienceJobs();
+  jobs.delete(cacheKey(platform, handle));
+  await savePendingAudienceJobs();
+  if (!jobs.size && chrome.alarms?.clear) await chrome.alarms.clear(AUDIENCE_RESUME_ALARM);
+}
+
+async function readAudiencePending(platform, handle) {
+  const jobs = await pendingAudienceJobs();
+  return jobs.get(cacheKey(platform, handle)) || null;
 }
 
 async function mapConcurrent(values, concurrency, worker) {
@@ -358,19 +448,20 @@ async function mapConcurrent(values, concurrency, worker) {
   return results;
 }
 
-async function runAudience(handle, cacheHours, isCancelled) {
+async function runAudience(handle, cacheHours) {
   const core = globalThis.CreatorIntelAudienceCore;
-  if (isCancelled()) throw new Error('分析已取消');
-  const reelsResponse = await apiCall('/api/v1/instagram/v2/fetch_user_reels', { username: handle });
+  const reelsResponse = await audienceApiCall('/api/v1/instagram/v2/fetch_user_reels', { username: handle }, handle, cacheHours);
   const codes = core.reelCodes(reelsResponse, AUDIENCE_REELS);
   if (!codes.length) throw new Error('取不到该账号近期 Reels，请确认账号公开且存在 Reels');
 
   const likeLists = await mapConcurrent(codes, 4, async (code) => {
-    if (isCancelled()) return [];
     try {
-      const response = await apiCall('/api/v1/instagram/v2/fetch_post_likes', { code_or_url: code });
+      const response = await audienceApiCall('/api/v1/instagram/v2/fetch_post_likes', { code_or_url: code }, handle, cacheHours);
       return core.postLikeUsers(response, AUDIENCE_PER_REEL);
-    } catch { return []; }
+    } catch (error) {
+      if (error?.code === 'AUDIENCE_REQUEST_CAP') throw error;
+      return [];
+    }
   });
   const candidates = [];
   const seen = new Set();
@@ -392,10 +483,10 @@ async function runAudience(handle, cacheHours, isCancelled) {
   let freshLookups = 0;
   let cursor = 0;
   let stop = false;
+  let capError = null;
   const worker = async () => {
     while (!stop) {
       const index = cursor++;
-      if (isCancelled()) { stop = true; return; }
       if (index >= candidates.length || analyzed >= AUDIENCE_MAX_LOOKUPS) return;
       const user = candidates[index];
       const userKey = `ig:${user.id}`;
@@ -409,14 +500,19 @@ async function runAudience(handle, cacheHours, isCancelled) {
       } else {
         if (cached) countryCache.delete(userKey);
         try {
-          const response = await apiCall('/api/v1/instagram/v3/get_user_about', { username: user.username });
+          const response = await audienceApiCall('/api/v1/instagram/v3/get_user_about', { username: user.username }, handle, cacheHours);
           country = core.countryFromAbout(response);
           if (country === undefined) throw new Error('ig_about_unavailable');
           countryCache.set(userKey, { cc: country || null, at: Date.now() });
           consecutiveErrors = 0;
           freshLookups += 1;
-          if (freshLookups % 25 === 0) await saveAudienceCountries();
-        } catch {
+          if (freshLookups % 10 === 0) await saveAudienceCountries();
+        } catch (error) {
+          if (error?.code === 'AUDIENCE_REQUEST_CAP') {
+            stop = true;
+            capError ||= error;
+            return;
+          }
           errors += 1;
           consecutiveErrors += 1;
           if (consecutiveErrors >= AUDIENCE_BREAK_AT) stop = true;
@@ -432,9 +528,11 @@ async function runAudience(handle, cacheHours, isCancelled) {
   };
   await Promise.all(Array.from({ length: Math.min(AUDIENCE_CONCURRENCY, candidates.length) }, worker));
   await saveAudienceCountries();
-  if (isCancelled()) throw new Error('分析已取消');
+  if (capError) throw capError;
   if (consecutiveErrors >= AUDIENCE_BREAK_AT) throw new Error('TikHub 受众接口连续异常，已停止请求以避免继续计费');
-  if (valid < AUDIENCE_MIN_VALID) throw new Error(`有效地区样本不足（${valid}/${AUDIENCE_MIN_VALID}），未生成画像`);
+  if (valid < AUDIENCE_MIN_VALID) {
+    throw new Error(`已检查 ${analyzed} 个互动用户，仅识别 ${valid} 个地区（至少需要 ${AUDIENCE_MIN_VALID} 个），未生成画像`);
+  }
   const result = core.buildResult({ handle, counts, analyzed, target: AUDIENCE_TARGET });
   if (!result) throw new Error(errors ? 'TikHub 受众接口暂时异常，请稍后重试' : '抽样用户均未公开所在地区');
   await writeAudienceCache(result);
@@ -445,42 +543,68 @@ function releaseAudienceSubscriber(subscriber) {
   if (!subscriber?.active || !subscriber.entry) return;
   subscriber.active = false;
   subscriber.entry.subscribers = Math.max(0, subscriber.entry.subscribers - 1);
-  if (subscriber.cancelled && subscriber.entry.subscribers === 0) subscriber.entry.cancelled = true;
 }
 
-async function fetchAudience(platform, handle, force = false, subscriber = { cancelled: false }) {
-  if (platform !== 'IG') return { ok: false, error: '粉丝画像目前仅支持 Instagram' };
-  const cfg = await settings();
-  if (subscriber.cancelled) return { ok: false, error: '分析已取消' };
-  if (!cfg.apiKey) return { ok: false, error: '请先在扩展设置中填写 TikHub API Key' };
-  if (!force) {
-    const cached = await readAudienceCache(platform, handle);
-    const fresh = Boolean(cached && Date.now() - Date.parse(cached.at) < cfg.cacheHours * 3_600_000);
-    if (fresh) return { ok: true, result: cached, cached: true };
-  }
+function ensureAudienceJob(platform, handle, cacheHours) {
   const key = cacheKey(platform, handle);
   let entry = audienceJobs.get(key);
-  if (entry?.cancelled) {
-    await entry.promise.catch(() => {});
-    entry = null;
+  if (entry) return entry;
+  entry = { subscribers: 0, promise: null };
+  audienceJobs.set(key, entry);
+  entry.promise = (async () => {
+    await markAudiencePending(platform, handle, cacheHours);
+    return runAudience(handle, cacheHours);
+  })().finally(async () => {
+    try { await clearAudiencePending(platform, handle); } catch {}
+    if (audienceJobs.get(key) === entry) audienceJobs.delete(key);
+  });
+  return entry;
+}
+
+async function fetchAudience(platform, handle, force = false, subscriber = null) {
+  if (platform !== 'IG') return { ok: false, error: '粉丝画像目前仅支持 Instagram' };
+  const cfg = await settings();
+  const normalizedHandle = String(handle || '').trim().replace(/^@/, '');
+  if (!cfg.apiKey) {
+    await clearAudiencePending(platform, normalizedHandle);
+    return { ok: false, error: '请先在扩展设置中填写 TikHub API Key' };
   }
-  if (!entry) {
-    entry = { cancelled: false, subscribers: 0, promise: null };
-    entry.promise = runAudience(String(handle || '').trim().replace(/^@/, ''), cfg.cacheHours, () => entry.cancelled)
-      .finally(() => { if (audienceJobs.get(key) === entry) audienceJobs.delete(key); });
-    audienceJobs.set(key, entry);
+  const key = cacheKey(platform, normalizedHandle);
+  const pending = await readAudiencePending(platform, normalizedHandle);
+  let entry = audienceJobs.get(key);
+  if (!force && !entry) {
+    const cached = await readAudienceCache(platform, normalizedHandle);
+    const fresh = Boolean(cached && Date.now() - Date.parse(cached.at) < cfg.cacheHours * 3_600_000);
+    const pendingCompleted = Boolean(pending && cached && Date.parse(cached.at) >= Date.parse(pending.startedAt));
+    if (fresh && (!pending || pendingCompleted)) {
+      await clearAudiencePending(platform, normalizedHandle);
+      return { ok: true, result: cached, cached: true };
+    }
   }
-  entry.subscribers += 1;
-  subscriber.entry = entry;
-  subscriber.active = true;
-  if (subscriber.cancelled) releaseAudienceSubscriber(subscriber);
+  entry ||= ensureAudienceJob(platform, normalizedHandle, cfg.cacheHours);
+  if (subscriber) {
+    entry.subscribers += 1;
+    subscriber.entry = entry;
+    subscriber.active = true;
+  }
   try {
-    if (subscriber.cancelled) return { ok: false, error: '分析已取消' };
     return { ok: true, result: await entry.promise, cached: false };
   } catch (error) {
     return { ok: false, error: error.message || '粉丝画像分析失败' };
   } finally {
     releaseAudienceSubscriber(subscriber);
+  }
+}
+
+async function resumePendingAudienceJobs() {
+  const jobs = await pendingAudienceJobs();
+  if (!jobs.size) {
+    if (chrome.alarms?.clear) await chrome.alarms.clear(AUDIENCE_RESUME_ALARM);
+    return;
+  }
+  await keepAudienceResumeAlarm();
+  for (const job of jobs.values()) {
+    fetchAudience(job.platform, job.handle, false).catch(() => {});
   }
 }
 
@@ -544,9 +668,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === 'getCachedAudience') {
-    Promise.all([settings(), readAudienceCache(message.platform, message.handle)]).then(([cfg, result]) => {
+    Promise.all([settings(), readAudienceCache(message.platform, message.handle), readAudiencePending(message.platform, message.handle)]).then(([cfg, result, pending]) => {
       const fresh = Boolean(result && Date.now() - Date.parse(result.at) < cfg.cacheHours * 3_600_000);
-      sendResponse({ result, fresh, configured: Boolean(cfg.apiKey) });
+      sendResponse({ result, fresh, configured: Boolean(cfg.apiKey), running: Boolean(pending), startedAt: pending?.startedAt || null });
     });
     return true;
   }
@@ -574,9 +698,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'creator-intel-audience') return;
   let started = false;
-  const subscriber = { cancelled: false, active: false, entry: null };
+  const subscriber = { active: false, entry: null };
   port.onDisconnect.addListener(() => {
-    subscriber.cancelled = true;
     releaseAudienceSubscriber(subscriber);
   });
   port.onMessage.addListener((message) => {
@@ -591,3 +714,11 @@ chrome.runtime.onConnect.addListener((port) => {
     });
   });
 });
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === AUDIENCE_RESUME_ALARM) resumePendingAudienceJobs().catch(() => {});
+  });
+}
+chrome.runtime.onStartup?.addListener(() => resumePendingAudienceJobs().catch(() => {}));
+resumePendingAudienceJobs().catch(() => {});

@@ -31,3 +31,19 @@
 - Confirmed cause: the published personal UI shell was restored without tracing the separate verified Instagram audience-analysis pipeline.
 - Future rule: preserve the basic profile stats, but treat “粉丝画像” as an explicit, cost-disclosed analysis of recent public audience accounts with progress, effective sample size, country/tier distribution, cache reuse, refresh, and failure states.
 - Verification: assert that the IG Followers panel contains the analysis button and result wiring, unit-test TikHub response parsing/aggregation, and confirm review, engagement-rate, and X-radar regression tests still pass.
+
+## TikHub About-country parsing must follow semantic keys and invalidate poisoned caches
+
+- Trigger: Instagram audience analysis receives the current Bloks payload from `instagram/v3/get_user_about`.
+- Error: valid countries were returned under `IG_ABOUT_THIS_ACCOUNT:about_this_account_country`, but the parser required the rendered English label `Account based in`; every result became `null`, and the 24-hour negative cache made retries repeat `0/20`.
+- Confirmed cause: tests covered only the older label-shaped payload and did not include the current semantic-key response.
+- Future rule: parse the exact non-visibility country key and its `initial`/value field, keep `Not shared` as unavailable, and bump both the per-user country cache and derived audience-result cache schemas whenever parsing semantics change.
+- Verification: use a fixture matching the live Bloks payload, assert the country is recognized, assert old negative and aggregate entries are discarded before any cached return, and keep the insufficient-sample message explicit about inspected versus valid counts.
+
+## Costed background analysis must persist independently of its page
+
+- Trigger: a user-started TikHub audience analysis outlives the originating Instagram tab.
+- Error: refreshing or closing the tab disconnected the content-script port, cancelled the job, and left only partial country entries without a final aggregate.
+- Confirmed cause: the page port was treated as the job lifetime instead of only a result subscriber, and no persisted pending marker could resume work after a Manifest V3 service-worker restart.
+- Future rule: keep the bounded job independent from subscribers, persist a minimal pending marker, request counter and partial country cache, use an alarm only to resume pending user-started work, and automatically reattach the UI when the same creator is reopened.
+- Verification: simulate subscriber disconnect plus service-worker restart, assert the final aggregate is saved and the pending marker/alarm is cleared, prove the persisted request cap survives restarts, and verify the packaged UI states that refresh or tab close is safe.

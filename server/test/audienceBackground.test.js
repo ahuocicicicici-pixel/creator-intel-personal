@@ -5,8 +5,10 @@ import vm from 'node:vm';
 
 const extensionRoot = new URL('../../extension/src/', import.meta.url);
 
-async function harness({ initialStorage = {}, about, storageDelay = 0 }) {
+async function harness({ initialStorage = {}, about, storageDelay = 0, initialAlarms = [] }) {
   const storage = { tikhubApiKey: 'test-key', cacheHours: 24, ...initialStorage };
+  const alarms = new Set(initialAlarms);
+  let apiCalls = 0;
   let connectListener;
   const context = vm.createContext({
     console, URL, URLSearchParams, AbortSignal, Date, Map, Set, Object, Number, String, Math, JSON, Promise, Array, RegExp, Intl,
@@ -24,10 +26,17 @@ async function harness({ initialStorage = {}, about, storageDelay = 0 }) {
       runtime: {
         onMessage: { addListener: () => {} },
         onConnect: { addListener: (listener) => { connectListener = listener; } },
+        onStartup: { addListener: () => {} },
+      },
+      alarms: {
+        create: async (name) => { alarms.add(name); },
+        clear: async (name) => alarms.delete(name),
+        onAlarm: { addListener: () => {} },
       },
       identity: {},
     },
     fetch: async (input) => {
+      apiCalls += 1;
       const url = new URL(input);
       if (url.pathname.endsWith('/fetch_user_reels')) {
         const handle = url.searchParams.get('username');
@@ -65,7 +74,20 @@ async function harness({ initialStorage = {}, about, storageDelay = 0 }) {
     incoming[0]({ type: 'fetchAudience', platform: 'IG', handle, force });
     return { result, disconnect: () => disconnect.forEach((listener) => listener()) };
   }
-  return { start, storage };
+  async function setPendingRequests(handle, requests) {
+    await context.markAudiencePending('IG', handle, 24);
+    const jobs = await context.pendingAudienceJobs();
+    jobs.get(`IG:${handle}`).requests = requests;
+    await context.savePendingAudienceJobs();
+  }
+  return {
+    start,
+    storage,
+    alarms,
+    apiCalls: () => apiCalls,
+    setPendingRequests,
+    fetchAudience: (handle) => context.fetchAudience('IG', handle, false),
+  };
 }
 
 function response(body, ok = true, status = 200) {
@@ -119,7 +141,48 @@ test('expired result and negative country caches are refreshed instead of reused
   assert.equal(result.result.topCountries[0].cc, 'IN');
 });
 
-test('disconnect cancels an unshared job and persists completed country lookups', async () => {
+test('incompatible negative country cache is cleared before current about responses are parsed', async () => {
+  let aboutCalls = 0;
+  const app = await harness({
+    initialStorage: {
+      audienceCache: { 'IG:current-shape': {
+        platform: 'IG', handle: 'current-shape', valid: 20, analyzed: 300,
+        at: new Date().toISOString(), tierPct: { T1: 100, T2: 0, T3: 0 }, topCountries: [],
+      } },
+      audienceCountryCache: { 'ig:poisoned-id': { cc: null, at: Date.now() } },
+    },
+    about: async () => {
+      aboutCalls += 1;
+      return response({ data: { payload: { layout: { bloks_payload: { data: [
+        { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country_visibility', initial: true } },
+        { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country', initial: 'India' } },
+      ] } } } } });
+    },
+  });
+  const result = await app.start('current-shape', false).result;
+  assert.equal(result.ok, true);
+  assert.equal(result.cached, false);
+  assert.ok(aboutCalls > 0);
+  assert.equal(app.storage.audienceCacheVersion, 2);
+  assert.equal(app.storage.audienceCountryCacheVersion, 2);
+  assert.equal(app.storage.audienceCountryCache['ig:poisoned-id'], undefined);
+  assert.equal(result.result.topCountries[0].cc, 'IN');
+});
+
+test('insufficient audience error reports inspected users separately from valid countries', async () => {
+  const app = await harness({
+    initialStorage: { audienceCountryCacheVersion: 2 },
+    about: async () => response({ data: { payload: { layout: { bloks_payload: { data: [
+      { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country_visibility', initial: false } },
+      { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country', initial: 'Not shared' } },
+    ] } } } } }),
+  });
+  const result = await app.start('private-audience').result;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /^已检查 \d+ 个互动用户，仅识别 0 个地区（至少需要 20 个），未生成画像$/);
+});
+
+test('disconnect leaves the background job running and saves the final result', async () => {
   let aboutCalls = 0;
   const app = await harness({
     about: async () => {
@@ -132,8 +195,107 @@ test('disconnect cancels an unshared job and persists completed country lookups'
   await new Promise((resolve) => setTimeout(resolve, 12));
   job.disconnect();
   const result = await job.result;
+  assert.equal(result.ok, true);
+  assert.equal(aboutCalls, 50);
+  assert.equal(app.storage.audienceCache['IG:leaving'].valid, 50);
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+  assert.equal(app.alarms.size, 0);
+});
+
+test('a persisted pending job resumes when the service worker starts again', async () => {
+  const app = await harness({
+    initialStorage: {
+      audiencePendingJobs: {
+        'IG:resume-me': { platform: 'IG', handle: 'resume-me', cacheHours: 24, startedAt: new Date().toISOString() },
+      },
+    },
+    about: async () => response({ data: { bloks: { text: 'Account based in', initial: 'India' } } }),
+  });
+  for (let attempt = 0; attempt < 50 && !app.storage.audienceCache?.['IG:resume-me']; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(app.storage.audienceCache['IG:resume-me'].valid, 50);
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+});
+
+test('a newer pending refresh job is not hidden by an older fresh aggregate', async () => {
+  const oldAt = new Date(Date.now() - 60_000).toISOString();
+  const app = await harness({
+    initialStorage: {
+      audienceCacheVersion: 2,
+      audienceCountryCacheVersion: 2,
+      audienceCache: { 'IG:refreshing': {
+        platform: 'IG', handle: 'refreshing', valid: 20, analyzed: 20, at: oldAt,
+        tierPct: { T1: 100, T2: 0, T3: 0 }, topCountries: [{ cc: 'US', count: 20, pct: 100 }],
+      } },
+      audiencePendingJobs: {
+        'IG:refreshing': { platform: 'IG', handle: 'refreshing', cacheHours: 24, requests: 0, startedAt: new Date().toISOString() },
+      },
+    },
+    about: async () => response({ data: { bloks: { text: 'Account based in', initial: 'India' } } }),
+  });
+  for (let attempt = 0; attempt < 50 && app.storage.audienceCache?.['IG:refreshing']?.at === oldAt; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(app.apiCalls() > 0);
+  assert.equal(app.storage.audienceCache['IG:refreshing'].topCountries[0].cc, 'IN');
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+});
+
+test('a resumed job preserves the persisted TikHub request cap', async () => {
+  const app = await harness({
+    initialStorage: {
+      audiencePendingJobs: {
+        'IG:capped': { platform: 'IG', handle: 'capped', cacheHours: 24, requests: 312, startedAt: new Date().toISOString() },
+      },
+    },
+    about: async () => response({ data: { bloks: { text: 'Account based in', initial: 'India' } } }),
+  });
+  for (let attempt = 0; attempt < 50 && Object.keys(app.storage.audiencePendingJobs || {}).length; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(app.apiCalls(), 1);
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+  assert.equal(app.storage.audienceCache?.['IG:capped'], undefined);
+});
+
+test('request-cap exhaustion is reported directly instead of as an upstream failure', async () => {
+  const app = await harness({
+    about: async () => response({ data: { bloks: { text: 'Account based in', initial: 'India' } } }),
+  });
+  await app.setPendingRequests('capped-message', 313);
+  const result = await app.fetchAudience('capped-message');
   assert.equal(result.ok, false);
-  assert.match(result.error, /取消/);
-  assert.ok(aboutCalls < 50);
-  assert.ok(Object.keys(app.storage.audienceCountryCache || {}).length > 0);
+  assert.match(result.error, /313 次 TikHub 请求上限/);
+  assert.equal(app.apiCalls(), 0);
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+});
+
+test('request cap waits for paid in-flight country lookups before saving and failing', async () => {
+  const app = await harness({
+    about: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return response({ data: { bloks: { text: 'Account based in', initial: 'India' } } });
+    },
+  });
+  await app.setPendingRequests('near-cap', 310);
+  const result = await app.fetchAudience('near-cap');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /313 次 TikHub 请求上限/);
+  assert.equal(app.apiCalls(), 3);
+  const cache = app.storage.audienceCountryCache || {};
+  assert.equal(Object.keys(cache).length, 1);
+  assert.equal(Object.values(cache)[0].cc, 'IN');
+  assert.deepEqual(app.storage.audiencePendingJobs, {});
+});
+
+test('service worker startup clears an orphan resume alarm when no job is pending', async () => {
+  const app = await harness({
+    initialAlarms: ['creator-intel-audience-resume'],
+    about: async () => response({ data: { bloks: { text: 'Account based in', initial: 'India' } } }),
+  });
+  for (let attempt = 0; attempt < 20 && app.alarms.size; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(app.alarms.size, 0);
 });

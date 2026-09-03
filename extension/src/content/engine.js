@@ -709,10 +709,10 @@
       const startAudience = async (force) => {
         audienceButton.hidden = false;
         audienceButton.disabled = true;
-        audienceButton.textContent = '正在分析… 0s';
-        setAudienceStatus('正在抽样近期互动用户；首次通常需要 1–3 分钟，请保持此页面开启');
+        audienceButton.textContent = '后台分析中… 0s';
+        setAudienceStatus('正在抽样近期互动用户；首次通常需要 1–3 分钟。可以刷新或关闭标签页，任务会在后台继续；进度自动保存，重新打开该账号后会自动接回');
         let seconds = 0;
-        const timer = setInterval(() => { seconds += 1; if (audienceButton.isConnected) audienceButton.textContent = `正在分析… ${seconds}s`; }, 1000);
+        const timer = setInterval(() => { seconds += 1; if (audienceButton.isConnected) audienceButton.textContent = `后台分析中… ${seconds}s`; }, 1000);
         const response = await runAudienceRequest({ type: 'fetchAudience', platform: config.code, handle: config.handle, force });
         clearInterval(timer);
         if (!wrapper.isConnected) return;
@@ -728,7 +728,8 @@
       audienceButton.addEventListener('click', () => startAudience(false));
       ask({ type: 'getCachedAudience', platform: config.code, handle: config.handle }).then((cached) => {
         if (!wrapper.isConnected || !cached) return;
-        if (cached.result) renderAudience(cached.result, { cached: true, fresh: cached.fresh });
+        if (cached.running) startAudience(false);
+        else if (cached.result) renderAudience(cached.result, { cached: true, fresh: cached.fresh });
         else if (!cached.configured) {
           audienceButton.textContent = '配置 TikHub Key 后分析';
           setAudienceStatus('当前未配置 TikHub API Key；页面基础数据不受影响');

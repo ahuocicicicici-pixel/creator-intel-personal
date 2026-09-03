@@ -7,6 +7,10 @@ async function source(path) {
   return readFile(new URL(`../../extension/${path}`, import.meta.url), 'utf8');
 }
 
+async function storeSource(path) {
+  return readFile(new URL(`../../store/${path}`, import.meta.url), 'utf8');
+}
+
 async function loadGlobal(path, name) {
   const context = { Date, Map, Set, Object, Number, String, Math, globalThis: {} };
   vm.runInNewContext(await source(path), context);
@@ -39,7 +43,8 @@ test('engagement stays unavailable until three complete posts share the same den
 
 test('personal manifest preserves creator reviews and loads the local X radar in the required worlds', async () => {
   const manifest = JSON.parse(await source('manifest.json'));
-  assert.equal(manifest.version, '1.3.3');
+  assert.equal(manifest.version, '1.3.5');
+  assert.deepEqual(manifest.permissions, ['storage', 'identity', 'alarms']);
   assert.deepEqual(manifest.content_scripts[0].js, ['src/content/x-viral-core.js', 'src/content/collector.js']);
   assert.deepEqual(manifest.content_scripts[1].js, ['src/content/metrics-core.js', 'src/content/engine.js']);
   assert.deepEqual(manifest.content_scripts[2].js, ['src/content/x-viral-ui-core.js', 'src/content/x-viral.js']);
@@ -55,6 +60,9 @@ test('personal manifest preserves creator reviews and loads the local X radar in
   assert.match(engine, /data-audience-query/);
   assert.match(engine, /type: 'fetchAudience'/);
   assert.match(engine, /creator-intel-audience/);
+  assert.match(engine, /可以刷新或关闭标签页，任务会在后台继续/);
+  assert.match(engine, /进度自动保存/);
+  assert.match(engine, /cached\.running\) startAudience\(false\)/);
   assert.match(engine, /type: 'ping'/);
   assert.doesNotMatch(engine, /audienceConfigured/);
   assert.match(background, /\/api\/reviews/);
@@ -76,6 +84,20 @@ test('personal manifest preserves creator reviews and loads the local X radar in
   assert.doesNotMatch(radar, /fetch\s*\(/);
 });
 
+test('store materials disclose resumable audience-job metadata consistently', async () => {
+  const materials = await Promise.all([
+    storeSource('listing.md'),
+    storeSource('submission-ready/LISTING.md'),
+    storeSource('privacy-practices.md'),
+    storeSource('submission-ready/PRIVACY-PRACTICES.md'),
+  ]);
+  for (const material of materials) {
+    assert.match(material, /public (?:Instagram )?handle, start\/update timestamps and reserved TikHub request count/);
+    assert.match(material, /Chrome alarms/);
+    assert.match(material, /user-started/);
+  }
+});
+
 test('Instagram audience core extracts public interactors and aggregates country tiers', async () => {
   const audience = await loadGlobal('src/audience-core.js', 'CreatorIntelAudienceCore');
   assert.deepEqual(Array.from(audience.reelCodes({ data: { items: [
@@ -92,6 +114,13 @@ test('Instagram audience core extracts public interactors and aggregates country
   assert.equal(audience.countryFromAbout({ data: { bloks: { text: 'Account based in', initial: 'Albania' } } }), 'AL');
   assert.equal(audience.countryFromAbout({ data: { bloks: { text: 'Account based in', initial: 'Slovenia' } } }), 'SI');
   assert.equal(audience.countryFromAbout({ data: { bloks: { text: 'Account based in', initial: 'Estonia' } } }), 'EE');
+  assert.equal(audience.countryFromAbout({ data: { payload: { layout: { bloks_payload: { data: [
+    { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country_visibility', initial: true } },
+    { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country', initial: 'Somalia' } },
+  ] } } } } }), 'SO');
+  assert.equal(audience.countryFromAbout({ data: { payload: { layout: { bloks_payload: { data: [
+    { data: { key: 'IG_ABOUT_THIS_ACCOUNT:about_this_account_country', initial: 'Not shared' } },
+  ] } } } } }), null);
   const result = audience.buildResult({ handle: 'creator', counts: { US: 3, IN: 1 }, analyzed: 5, target: 100, at: '2026-09-03T00:00:00.000Z' });
   assert.equal(result.valid, 4);
   assert.deepEqual({ ...result.tierPct }, { T1: 75, T2: 25, T3: 0 });
